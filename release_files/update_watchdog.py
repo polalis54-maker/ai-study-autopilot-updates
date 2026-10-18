@@ -21,6 +21,9 @@ GROUP=2
 # Draft-only model: no reasoning-token overhead. Gemini remains independent reviewer.
 GENERATION_MODEL='gpt-4.1-mini'
 GEN_DAILY=20
+# Pause optional OpenAI rewriter until its HTTP 400 path is diagnosed.
+# Never block the already Gemini-reviewed valid questions.
+ENABLE_OPTIONAL_REPAIR=False
 REV_DAILY=5
 CALL_CAP=25
 ONE_TIME_EXTRA_DATE='2026-10-18'
@@ -318,7 +321,7 @@ def run_fast(*,demo=False,force=False,generate_only=False):
             checkpoint()
             progress('RUNNING','Gemini新規レビュー',f'今回{generated}問')
         # Fix weak or REVISE-flagged *new* questions once, then ask Gemini again.
-        for qid, entry in list(state['generated'].items())[-GEN_DAILY:]:
+        for qid, entry in (list(state['generated'].items())[-GEN_DAILY:] if ENABLE_OPTIONAL_REPAIR else []):
             if api.calls+3>api.limit:break
             if entry['status'] not in ('REVISE_UNRESOLVED','NEEDS_QUALITY_UPGRADE'):continue
             if entry.get('repair_deferred'):
