@@ -29,7 +29,9 @@ class FakeA:
 a=FakeA()
 scope={"a":a,"json":json,"urllib":urllib,"CALL_CAP":25,
        "ONE_TIME_EXTRA_DATE":"2026-10-18","ONE_TIME_EXTRA_LIMIT":50,
-       "GENERATION_MODEL":"gpt-4.1-mini"}
+       "GENERATION_MODEL":"gpt-4.1-mini",
+       "CAMPAIGN_START":"2026-10-19","CAMPAIGN_DAILY_CAP":100,
+       "CUTOFF":"2026-10-28"}
 declarations = [node for node in tree.body if isinstance(node,ast.Assign)
                 and any(isinstance(t,ast.Name) and t.id in ("FIELDS","SCHEMA")
                         for t in node.targets)]
@@ -39,7 +41,9 @@ module=ast.fix_missing_locations(ast.Module(body=subset,type_ignores=[]))
 exec(compile(module,str(p),"exec"),scope)
 
 assert scope["daily_call_cap"]()==50
-assert scope["daily_call_cap"]("2026-10-19")==25
+assert scope["daily_call_cap"]("2026-10-19")==100
+assert scope["daily_call_cap"]("2026-10-28")==100
+assert scope["daily_call_cap"]("2026-10-29")==25
 state={"last_attempt":"2026-10-18","auto_retry_date":"2026-10-18",
        "history":[{"date":"2026-10-18","calls":23,"errors":["other failure"]},
                   {"date":"2026-10-18","calls":7,"errors":["NameError: name 'urllib' is not defined"]}]}
