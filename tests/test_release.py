@@ -99,4 +99,11 @@ specs=[{"id":i,"type":"single","domain":"D1","difficulty":"中級"}
        for i in ("q1","q2")]
 accepted=scope["salvage_batch"](PartialAPI(),specs,"prompt")
 assert [q["id"] for q in accepted]==["q1"], "Keep valid neighbor"
+# The repair stage is optional; an HTTP 400 must not erase successful questions.
+assert "ENABLE_OPTIONAL_REPAIR=False" in source
+assert "if ENABLE_OPTIONAL_REPAIR else []" in source
+assert "if entry.get('repair_deferred')" in source
+assert "except RuntimeError as exc:" in source
+assert "entry['repair_deferred']=True" in source
+assert "'action':'repair_deferred_http_error'" in source
 print("PASS: non-reasoning generator request, structured output, single-ID fallback, partial salvage, recovery, date-scoped cap")
