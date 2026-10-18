@@ -5,6 +5,8 @@ The watched machine must be awake. No deployment to Netlify; no secret uploads.
 from __future__ import annotations
 import datetime, html, json, os, subprocess, sys, time
 from pathlib import Path
+import urllib.error
+import urllib.request
 import autopilot as a
 import update_agent as ua
 
@@ -152,30 +154,6 @@ def specs_for(state,n):
                       'difficulty':'上級' if ix%3==2 else '中級'})
     return specs
 
-def make(api,specs):
-    wanted={s['id']:s for s in specs}
-    for attempt in range(2):
-        try:
-            response=api.call('openai',G_PROMPT,{'specs':specs,'retry_format':attempt>0})
-            qs=response.get('questions')
-            if not isinstance(qs,list) or len(qs)!=len(specs):raise ValueError('生成数不一致')
-            ids=[q.get('id') for q in qs if isinstance(q,dict)]
-            if len(ids)!=len(specs) or set(ids)!=set(wanted) or len(set(ids))!=len(ids):
-                raise ValueError('問題IDが欠落・重複')
-            for q in qs:
-                a.validate(q,strict=True)
-                s=wanted[q['id']]
-                if (q['exam']!='SAA-C03' or q['type']!=s['type'] or q['domain']!=s['domain'] or q['difficulty']!=s['difficulty']):
-                    raise ValueError('分野・難易度・形式が不一致')
-                if q['type']=='multiple' and not any(x in q['question'] for x in ('2つ','２つ','二つ','2 つ')):
-                    raise ValueError('複数選択の正解数が問題文に未記載')
-                q['source']={'kind':'original','label':'AI Study Auto-generated / AI review pending'}
-                q['review_status']='ai_review_pending'
-            return qs
-        except (ValueError,KeyError,TypeError):
-            if attempt:raise
-    return []
-
 # Validate each generated question separately; preserve valid neighbors.
 def make(api,specs):
     return salvage_batch(api,specs,G_PROMPT)
@@ -212,7 +190,20 @@ def retry_due(state):
     return bool(entries and entries[-1].get('errors') and daily_call_cap()-used_today(state)>=4)
 
 
-def run_fast(*,demo=False,force=False):
+def fix_retry_due(state):
+    """One extra recovery in the explicitly authorized Oct 18 budget, never daily."""
+    if a.today() != ONE_TIME_EXTRA_DATE or state.get('last_attempt') != a.today():
+        return False
+    if state.get('post_fix_retry_date') == a.today():
+        return False
+    entries=[h for h in state.get('history', []) if isinstance(h,dict) and h.get('date')==a.today()]
+    if not entries or not entries[-1].get('errors'):
+        return False
+    errors=' | '.join(str(x) for x in entries[-1]['errors'])
+    return "name 'urllib' is not defined" in errors and daily_call_cap()-used_today(state)>=4
+
+
+def run_fast(*,demo=False,force=False,generate_only=False):
     if a.today()>CUTOFF and not demo:
         print('10/28を過ぎたため生成停止');return 0
     existing=a.jread(a.STUDY_FILE)['questions']
@@ -279,7 +270,7 @@ def run_fast(*,demo=False,force=False):
         return valid
     progress('RUNNING','既存レビューと新規問題生成を開始')
     try:
-        missing=[q for q in existing if q['id'] not in state['existing'] and q['id'] not in state['generated']][:REV_DAILY]
+        missing=[] if generate_only else [q for q in existing if q['id'] not in state['existing'] and q['id'] not in state['generated']][:REV_DAILY]
         for start in range(0,len(missing),GROUP):
             if api.calls+2>api.limit:break
             group=missing[start:start+GROUP]
@@ -392,7 +383,7 @@ def write_runtime_status(status, detail='', child_pid=None):
       'today_remaining':max(0,daily_call_cap()-used_today(state)),
       'last_errors':errors[:3],
       'last_phase':live.get('phase','') if status=='RUNNING' else '',
-      'next_run':('本日中にエラー再試行予定' if retry_due(state) else ('本日中の再試行済み・翌日実行' if state.get('auto_retry_date')==today() else ('PC起動中に翌日実行' if already_attempted() else 'まもなく開始'))),
+      'next_run':('今夜の残り枠で新規生成を再開予定' if fix_retry_due(state) else ('本日中にエラー再試行予定' if retry_due(state) else ('本日中の再試行済み・翌日実行' if state.get('auto_retry_date')==today() else ('PC起動中に翌日実行' if already_attempted() else 'まもなく開始')))),
       'sync_status':_read_obj(ROOT/'work'/'outputs'/'study_sync_status.json').get('status','未記録')}
     RUNTIME.parent.mkdir(parents=True,exist_ok=True)
     tmp=RUNTIME.with_suffix('.json.tmp')
@@ -415,16 +406,18 @@ def already_attempted():
     try:return json.loads((ROOT/'work'/'state.json').read_text(encoding='utf-8')).get('last_attempt')==today()
     except (OSError,ValueError,TypeError):return False
 
-def run_daily(*, retry=False):
+def run_daily(*, retry=False, post_fix=False):
     if retry:
         # Reserve the one allowed automatic retry before launching a child.
         state=_read_obj(ROOT/'work'/'state.json')
         state['auto_retry_date']=today()
+        if post_fix:
+            state['post_fix_retry_date']=today()
         a.jwrite(ROOT/'work'/'state.json',state)
     LOG.parent.mkdir(parents=True,exist_ok=True)
     with LOG.open('a',encoding='utf-8') as log:
         log.write('\n=== '+datetime.datetime.now().isoformat(timespec='seconds')+(' / エラー再試行 ===\n' if retry else ' / 高速バッチ ===\n'));log.flush()
-        proc=subprocess.Popen([sys.executable,str(ROOT/'update_watchdog.py'),'batch-retry' if retry else 'batch-once'],
+        proc=subprocess.Popen([sys.executable,str(ROOT/'update_watchdog.py'),'batch-new-only' if post_fix else ('batch-retry' if retry else 'batch-once')],
                               cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
         while True:
             write_runtime_status('RUNNING','OpenAI生成・Geminiレビューを実行中',child_pid=proc.pid)
@@ -456,6 +449,7 @@ def scheduler(checker=ua.check_and_apply, *, iterations=None, sleep=time.sleep):
                 except Exception as exc:ua.log('更新確認失敗（生成は継続）: '+str(exc))
                 next_update=now+UPDATE_INTERVAL_SEC
             if not already_attempted():run_daily()
+            elif fix_retry_due(_read_obj(ROOT/'work'/'state.json')):run_daily(retry=True,post_fix=True)
             elif retry_due(_read_obj(ROOT/'work'/'state.json')):run_daily(retry=True)
             write_runtime_status('WAITING','本日の処理は完了。次回実行を待機中')
             checks+=1
@@ -477,6 +471,8 @@ if __name__=='__main__':
         sys.exit(run_fast(force=True))
     if sys.argv[1:]==['batch-retry']:
         sys.exit(run_fast(force=True))
+    if sys.argv[1:]==['batch-new-only']:
+        sys.exit(run_fast(force=True,generate_only=True))
     if len(sys.argv)>1:
         print('Unknown argument');sys.exit(2)
     try:scheduler()
