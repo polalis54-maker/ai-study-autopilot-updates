@@ -44,6 +44,8 @@ jobs:
           assert effective('2026-10-28') == 25
           print('Temporary 50-request cap and automatic 25-request reversion passed.')
           PY
+      - name: Exercise batch runtime and one-time recovery without API calls
+        run: python3 tests/test_release.py
       - name: Package and checksum permitted files
         id: package
         shell: bash
