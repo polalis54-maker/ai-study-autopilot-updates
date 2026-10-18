@@ -18,6 +18,8 @@ REQUEST=ua.UPDATES/'check_requested'
 UPDATE_INTERVAL_SEC=3600
 CUTOFF='2026-10-28'
 GROUP=2
+# Draft-only model: no reasoning-token overhead. Gemini remains independent reviewer.
+GENERATION_MODEL='gpt-4.1-mini'
 GEN_DAILY=20
 REV_DAILY=5
 CALL_CAP=25
@@ -58,14 +60,13 @@ def structured_batch_call(client, prompt, payload):
         raise RuntimeError('API request cap reached')
     client.calls+=1
     request={
-        'model':a.OPENAI_MODEL,
+        'model':GENERATION_MODEL,
         'instructions':prompt + (
             '\nChoices must be a JSON ARRAY of 4 strings for single or 5 strings'
             ' for multiple, in A/B/C/D(/E) order. Follow every spec exactly.'
         ),
         'input':json.dumps(payload,ensure_ascii=False),
         'store':False, 'max_output_tokens':9500,
-        'reasoning':{'effort':'low'},
         'text':{'format':{
             'type':'json_schema','name':'saa_batch',
             'strict':True,'schema':SCHEMA
@@ -87,7 +88,7 @@ def structured_batch_call(client, prompt, payload):
         raise RuntimeError('OpenAI network error / timeout') from None
     if output.get('status')=='incomplete':
         reason=(output.get('incomplete_details') or {}).get('reason','unknown')
-        raise ValueError('OpenAI response truncated: '+str(reason))
+        raise ValueError('OpenAI response truncated: '+str(reason)+' (model='+GENERATION_MODEL+')')
     if output.get('status')!='completed':
         raise ValueError('OpenAI response not completed')
     texts=[item.get('text','') for block in output.get('output',[])
@@ -246,26 +247,33 @@ def run_fast(*,demo=False,force=False,generate_only=False):
             cut=len(group)//2
             return {**review_safe(group[:cut]),**review_safe(group[cut:])}
     def make_safe(group):
+        # A malformed response must not discard valid neighbors.
         try:
             valid=make(api,group)
         except (ValueError,TypeError,KeyError) as exc:
             valid=[]
-            errors.append('生成応答形式エラー: '+str(exc)[:150])
+            print('[FAST][WARN] バッチ生成不完全。個別再試行: '+str(exc)[:160],flush=True)
         found={q['id'] for q in valid}
         missing=[spec for spec in group if spec['id'] not in found]
-        # Keep enough request budget for Gemini to review any salvaged item.
-        if missing and len(group)>1 and api.calls+3<=api.limit:
-            try:
-                extra=make(api,missing)
-                valid.extend(extra)
-                found.update(q['id'] for q in extra)
-            except (ValueError,TypeError,KeyError) as exc:
-                errors.append('不足分の生成失敗: '+str(exc)[:150])
-        for spec in missing:
+        # Retry missing IDs INDIVIDUALLY, not as the same oversized batch.
+        # Reserve one API call for Gemini to review any salvaged proposals.
+        if missing and len(group)>1:
+            for spec in missing:
+                if api.calls+2>api.limit:
+                    break
+                try:
+                    extra=make(api,[spec])
+                    for q in extra:
+                        if q['id'] not in found:
+                            valid.append(q)
+                            found.add(q['id'])
+                except (ValueError,TypeError,KeyError) as exc:
+                    print('[FAST][WARN] 単独生成も不完全: '+str(exc)[:160],flush=True)
+        for spec in group:
             if spec['id'] not in found:
                 state['failed_generations'][spec['id']]={
-                    'date':a.today(),'reason':'問題の形式不備または生成数不足'}
-                errors.append(spec['id']+': 形式不備で未採用')
+                    'date':a.today(),'reason':'問題の形式不備・応答途中終了またはAPI残枠不足'}
+                errors.append(spec['id']+': 形式不備または未完了で未採用')
         if missing:checkpoint()
         return valid
     progress('RUNNING','既存レビューと新規問題生成を開始')
