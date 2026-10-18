@@ -28,7 +28,8 @@ class FakeA:
 
 a=FakeA()
 scope={"a":a,"json":json,"urllib":urllib,"CALL_CAP":25,
-       "ONE_TIME_EXTRA_DATE":"2026-10-18","ONE_TIME_EXTRA_LIMIT":50}
+       "ONE_TIME_EXTRA_DATE":"2026-10-18","ONE_TIME_EXTRA_LIMIT":50,
+       "GENERATION_MODEL":"gpt-4.1-mini"}
 declarations = [node for node in tree.body if isinstance(node,ast.Assign)
                 and any(isinstance(t,ast.Name) and t.id in ("FIELDS","SCHEMA")
                         for t in node.targets)]
@@ -68,9 +69,20 @@ class Response:
         ]}).encode("utf-8")
 
 client=Client()
-with patch.object(urllib.request,"urlopen",lambda request,timeout:Response()):
+sent=[]
+def simulate_api(request,timeout):
+    body=json.loads(request.data.decode("utf-8"))
+    sent.append(body)
+    return Response()
+with patch.object(urllib.request,"urlopen",simulate_api):
     d=scope["structured_batch_call"](client,"prompt",{"specs":[]})
 assert d=={"questions":[]} and client.calls==1
+assert sent[0]["model"]=="gpt-4.1-mini", "Drafting must use non-reasoning model"
+assert sent[0]["text"]["format"]["type"]=="json_schema"
+assert sent[0]["text"]["format"]["strict"] is True
+assert "reasoning" not in sent[0], "Non-reasoning model must not receive reasoning parameter"
+assert "extra=make(api,[spec])" in source, "Missing individual fallback for truncated batches"
+
 
 class PartialAPI:
     def call(self,*args):
@@ -87,4 +99,4 @@ specs=[{"id":i,"type":"single","domain":"D1","difficulty":"中級"}
        for i in ("q1","q2")]
 accepted=scope["salvage_batch"](PartialAPI(),specs,"prompt")
 assert [q["id"] for q in accepted]==["q1"], "Keep valid neighbor"
-print("PASS: urllib import, JSON schema pathway, partial salvage, same-day recovery, date-scoped cap")
+print("PASS: non-reasoning generator request, structured output, single-ID fallback, partial salvage, recovery, date-scoped cap")
