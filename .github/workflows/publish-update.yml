@@ -46,6 +46,8 @@ jobs:
           PY
       - name: Exercise batch runtime and one-time recovery without API calls
         run: python3 tests/test_release.py
+      - name: Verify 200 Gemini-PASS goal and date-scoped 100-call budget
+        run: python3 tests/test_campaign.py
       - name: Package and checksum permitted files
         id: package
         shell: bash
