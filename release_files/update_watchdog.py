@@ -17,8 +17,8 @@ UPDATE_INTERVAL_SEC=3600
 CUTOFF='2026-10-28'
 GROUP=2
 GEN_DAILY=20
-REV_DAILY=15
-CALL_CAP=45
+REV_DAILY=5
+CALL_CAP=25
 
 G_PROMPT='''AWS SAA-C03のオリジナル日本語模擬試験を生成。specsと同じ件数を返す。中〜上級の実務シナリオ。可用性・コスト・運用負荷・DRなどの制約を2つ以上含め、誤答ももっともらしく。全選択肢の正誤理由を解説。公式問題を転載しない。JSONのみ: {"questions":[{"id":"指定ID","exam":"SAA-C03","domain":"D1","topic":"...","type":"single","question":"...","choices":{"A":"...","B":"...","C":"...","D":"..."},"correct":["A"],"explanation":"...","difficulty":"中級","language":"ja","review_status":"ai_review_pending","source":{"kind":"original","label":"AI Study Auto-generated / AI review pending"}}]} singleは4択1正解、multipleは5択2正解で問題文に「2つ選択」を明記。すべてのIDと属性を守り、省略しない。'''
 R_PROMPT=a.REVIEW_PROMPT.split('JSONオブジェクトだけ返答:')[0]+'''\n各questionsを独立かつ厳格にレビュー。全問題IDについて回答し、資料を調べたと偽らない。JSONのみ: {"reviews":[{"id":"指定ID","verdict":"PASS|REVISE|BLOCK","issues":[],"notes":"...","needs_official_verification":true,"exam_quality":{"distractor_quality":3,"scenario_realism":3,"explanation_depth":3,"difficulty_alignment":3,"reason":"..."}}]}'''
