@@ -34,15 +34,17 @@ jobs:
           fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'daily_call_cap')
           ctx = {'a': SimpleNamespace(today=lambda: '2026-10-18'),
                  'CALL_CAP': 25, 'ONE_TIME_EXTRA_DATE': '2026-10-18',
-                 'ONE_TIME_EXTRA_LIMIT': 50}
+                 'ONE_TIME_EXTRA_LIMIT': 50, 'CAMPAIGN_START':'2026-10-19',
+                 'CAMPAIGN_DAILY_CAP':100, 'CUTOFF':'2026-10-28'}
           exec(compile(ast.Module(body=[fn], type_ignores=[]), '<cap-test>', 'exec'), ctx)
           effective = ctx['daily_call_cap']
           assert effective() == 50
           assert effective('2026-10-18') == 50
           assert effective('2026-10-17') == 25
-          assert effective('2026-10-19') == 25
-          assert effective('2026-10-28') == 25
-          print('Temporary 50-request cap and automatic 25-request reversion passed.')
+          assert effective('2026-10-19') == 100
+          assert effective('2026-10-28') == 100
+          assert effective('2026-10-29') == 25
+          print('Daily 100-request cap, Oct 18 exception, and Oct 29 reversion passed.')
           PY
       - name: Exercise batch runtime and one-time recovery without API calls
         run: python3 tests/test_release.py
