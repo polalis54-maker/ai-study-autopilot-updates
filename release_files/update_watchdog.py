@@ -3,7 +3,7 @@
 The watched machine must be awake. No deployment to Netlify; no secret uploads.
 """
 from __future__ import annotations
-import datetime, json, os, subprocess, sys, time
+import datetime, html, json, os, subprocess, sys, time
 from pathlib import Path
 import autopilot as a
 import update_agent as ua
@@ -213,6 +213,57 @@ def run_fast(*,demo=False,force=False):
 
 def today():return datetime.datetime.now().astimezone().date().isoformat()
 
+
+RUNTIME=ROOT/'work'/'outputs'/'runtime_status.json'
+DASHBOARD=ROOT/'work'/'outputs'/'runtime_status.html'
+
+def _read_obj(path):
+    try:
+        data=json.loads(path.read_text(encoding='utf-8-sig'))
+        return data if isinstance(data,dict) else {}
+    except (OSError,ValueError):return {}
+
+def write_runtime_status(status, detail='', child_pid=None):
+    """Publish local heartbeat while waiting AND while generating. Never uses API."""
+    state=_read_obj(ROOT/'work'/'state.json')
+    last=_read_obj(ROOT/'work'/'outputs'/'last_result.json')
+    live=_read_obj(ROOT/'work'/'outputs'/'live_progress.json')
+    generated=state.get('generated') or {}
+    reviewed=state.get('existing') or {}
+    errors=last.get('errors') or []
+    if status=='WAITING' and errors and last.get('date')==today():
+        status='ERROR_WAITING'
+    now=datetime.datetime.now().astimezone()
+    data={'status':status,'detail':detail,'timestamp':now.isoformat(timespec='seconds'),
+      'unix_time':time.time(),'watchdog_pid':os.getpid(),'child_pid':child_pid,
+      'version':ua.local_version(),'last_attempt':state.get('last_attempt',''),
+      'reviewed_count':len(reviewed),'reviewed_pass':sum(
+          isinstance(x,dict) and x.get('status')=='AI_PASS' for x in reviewed.values()),
+      'generated_count':len(generated),'generated_pass':sum(
+          isinstance(x,dict) and x.get('status')=='AI_PASS' for x in generated.values()),
+      'pending_count':len(state.get('pending') or {}),
+      'total_calls':state.get('total_calls',0),
+      'last_errors':errors[:3],
+      'last_phase':live.get('phase','') if status=='RUNNING' else '',
+      'next_run':'PC起動中に翌日実行' if already_attempted() else 'まもなく開始',
+      'sync_status':_read_obj(ROOT/'work'/'outputs'/'study_sync_status.json').get('status','未記録')}
+    RUNTIME.parent.mkdir(parents=True,exist_ok=True)
+    tmp=RUNTIME.with_suffix('.json.tmp')
+    tmp.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    tmp.replace(RUNTIME)
+    esc=lambda v:html.escape(str(v),quote=True)
+    labels={'STARTING':'起動準備中','WAITING':'待機中（正常）','RUNNING':'生成・レビュー中',
+            'ERROR_WAITING':'前回エラーあり・待機中','STOPPED':'停止中'}
+    label=labels.get(status,status)
+    color='#57d6a5' if status=='WAITING' else ('#ffd078' if status in ('RUNNING','STARTING') else '#f09eab')
+    latest=esc(data['last_phase'] or detail)
+    err=esc(' / '.join(map(str,errors[:2])) if errors else 'なし')
+    page=f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="8"><title>AI Study 稼働状況</title><style>body{{background:#101827;color:#f5f7fc;font:16px/1.7 system-ui,sans-serif;max-width:820px;margin:32px auto;padding:0 16px}}main{{background:#1c2840;border:1px solid #3e5375;border-radius:18px;padding:24px}}h2{{color:{color}}}small{{color:#aab8d0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.cards>div{{background:#111c31;padding:15px;border-radius:12px;flex:1;min-width:130px}}strong{{display:block;font-size:1.4rem}}#signal{{font-weight:bold}}</style></head><body><h1>🎓 AI Study Autopilot</h1><main><small>v{esc(data['version'])}</small><h2>{esc(label)}</h2><p>{latest}</p><div class="cards"><div>既存レビュー<strong>{data['reviewed_count']} / 55</strong></div><div>新規保存<strong>{data['generated_count']}問</strong></div><div>新規 Gemini PASS<strong>{data['generated_pass']}問</strong></div></div><p>次回: {esc(data['next_run'])}</p><p>アプリ同期: {esc(data['sync_status'])}</p><p>直近のエラー: {err}</p><small>生存信号: {esc(data['timestamp'])} / PID {data['watchdog_pid']}</small><p id="signal">生存信号を確認中…</p></main><p><small>8秒ごとに更新。2分間更新がなければ停止・フリーズの疑い。AI PASSはAWS公式確認済みではありません。</small></p><script>const t={int(data['unix_time']*1000)};function check(){{const elapsed=Math.max(0,Date.now()-t),el=document.getElementById('signal');el.textContent=elapsed>120000?'⚠ 生存信号が2分以上更新されていません':('● 生存信号あり '+Math.floor(elapsed/1000)+'秒前');el.style.color=elapsed>120000?'#ffab83':'#57d6a5';}}check();setInterval(check,4000)</script></body></html>'''
+    tmp=DASHBOARD.with_suffix('.html.tmp')
+    tmp.write_text(page,encoding='utf-8')
+    tmp.replace(DASHBOARD)
+    return data
+
 def already_attempted():
     try:return json.loads((ROOT/'work'/'state.json').read_text(encoding='utf-8')).get('last_attempt')==today()
     except (OSError,ValueError,TypeError):return False
@@ -221,9 +272,16 @@ def run_daily():
     LOG.parent.mkdir(parents=True,exist_ok=True)
     with LOG.open('a',encoding='utf-8') as log:
         log.write('\n=== '+datetime.datetime.now().isoformat(timespec='seconds')+' / 高速バッチ ===\n');log.flush()
-        res=subprocess.run([sys.executable,str(ROOT/'update_watchdog.py'),'batch-once'],
-                           cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=False)
-        log.write(f'[WATCHDOG] 高速日次実行終了 exit={res.returncode}\n')
+        proc=subprocess.Popen([sys.executable,str(ROOT/'update_watchdog.py'),'batch-once'],
+                              cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
+        while True:
+            write_runtime_status('RUNNING','OpenAI生成・Geminiレビューを実行中',child_pid=proc.pid)
+            try:code=proc.wait(timeout=6)
+            except subprocess.TimeoutExpired:continue
+            break
+        log.write(f'[WATCHDOG] 高速日次実行終了 exit={code}\n')
+        log.flush()
+    write_runtime_status('WAITING','本日の処理終了。次の実行を待機中' if code==0 else '処理がエラーで終了。ログを確認')
     ua.log('高速版の日次実行が終了。scheduler.logに結果を保存')
 
 def scheduler(checker=ua.check_and_apply, *, iterations=None, sleep=time.sleep):
@@ -232,6 +290,7 @@ def scheduler(checker=ua.check_and_apply, *, iterations=None, sleep=time.sleep):
     if lock is None:
         ua.log('別のAutopilotが起動中のため二重起動しません');return
     checks=0;next_update=0.0;previous_result=''
+    write_runtime_status('STARTING','常駐プログラムを起動しました')
     try:
         while not STOP.exists() and today()<=CUTOFF:
             now=time.monotonic()
@@ -245,12 +304,15 @@ def scheduler(checker=ua.check_and_apply, *, iterations=None, sleep=time.sleep):
                 except Exception as exc:ua.log('更新確認失敗（生成は継続）: '+str(exc))
                 next_update=now+UPDATE_INTERVAL_SEC
             if not already_attempted():run_daily()
+            write_runtime_status('WAITING','本日の処理は完了。次回実行を待機中')
             checks+=1
             if iterations is not None and checks>=iterations:break
             for _ in range(60):
                 if STOP.exists():break
                 sleep(1)
-    finally:ua.release_lock(lock)
+    finally:
+        write_runtime_status('STOPPED','停止要求または期限到達')
+        ua.release_lock(lock)
     ua.log('自動実行が終了')
 
 if __name__=='__main__':
