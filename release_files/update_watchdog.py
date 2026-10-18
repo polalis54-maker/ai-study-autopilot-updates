@@ -19,6 +19,14 @@ GROUP=2
 GEN_DAILY=20
 REV_DAILY=5
 CALL_CAP=25
+ONE_TIME_EXTRA_DATE='2026-10-18'
+ONE_TIME_EXTRA_LIMIT=50
+
+def daily_call_cap(day=None):
+    # Temporary consent: 2026-10-18 only. All other dates stay at 25.
+    day=a.today() if day is None else day
+    return ONE_TIME_EXTRA_LIMIT if day==ONE_TIME_EXTRA_DATE else CALL_CAP
+
 
 G_PROMPT='''AWS SAA-C03のオリジナル日本語模擬試験を生成。specsと同じ件数を返す。中〜上級の実務シナリオ。可用性・コスト・運用負荷・DRなどの制約を2つ以上含め、誤答ももっともらしく。全選択肢の正誤理由を解説。公式問題を転載しない。JSONのみ: {"questions":[{"id":"指定ID","exam":"SAA-C03","domain":"D1","topic":"...","type":"single","question":"...","choices":{"A":"...","B":"...","C":"...","D":"..."},"correct":["A"],"explanation":"...","difficulty":"中級","language":"ja","review_status":"ai_review_pending","source":{"kind":"original","label":"AI Study Auto-generated / AI review pending"}}]} singleは4択1正解、multipleは5択2正解で問題文に「2つ選択」を明記。すべてのIDと属性を守り、省略しない。'''
 R_PROMPT=a.REVIEW_PROMPT.split('JSONオブジェクトだけ返答:')[0]+'''\n各questionsを独立かつ厳格にレビュー。全問題IDについて回答し、資料を調べたと偽らない。JSONのみ: {"reviews":[{"id":"指定ID","verdict":"PASS|REVISE|BLOCK","issues":[],"notes":"...","needs_official_verification":true,"exam_quality":{"distractor_quality":3,"scenario_realism":3,"explanation_depth":3,"difficulty_alignment":3,"reason":"..."}}]}'''
@@ -201,7 +209,7 @@ def retry_due(state):
     if state.get('auto_retry_date') == a.today():
         return False
     entries=[h for h in state.get('history',[]) if isinstance(h,dict) and h.get('date')==a.today()]
-    return bool(entries and entries[-1].get('errors') and CALL_CAP-used_today(state)>=4)
+    return bool(entries and entries[-1].get('errors') and daily_call_cap()-used_today(state)>=4)
 
 
 def run_fast(*,demo=False,force=False):
@@ -214,7 +222,7 @@ def run_fast(*,demo=False,force=False):
     state.setdefault('failed_generations',{})
     if not demo and state['last_attempt']==a.today() and not force:
         print('今日は既に実行済み。API呼び出しなし');return 0
-    remaining=CALL_CAP if demo else max(0,CALL_CAP-used_today(state))
+    remaining=daily_call_cap() if demo else max(0,daily_call_cap()-used_today(state))
     if not demo and remaining<4:
         print(f'本日のAPI残枠不足: {remaining}回。追加呼び出しなし。');return 0
     keys=('', '') if demo else a.load_keys()
@@ -343,7 +351,7 @@ def run_fast(*,demo=False,force=False):
         checkpoint();a.build_pack(state);a.produce_report(state)
         a.jwrite(a.OUT/'last_result.json',state['history'][-1])
     progress('ERROR' if errors else 'COMPLETE','高速処理終了',errors[0] if errors else f'既存{reviewed}件・新規{generated}件')
-    print(f'処理結果: 既存レビュー{reviewed}問・新規審査{generated}問・未審査{len(state["pending"])}問・API {api.calls}/{remaining}回（本日累計{used_today(state)}/{CALL_CAP}回）')
+    print(f'処理結果: 既存レビュー{reviewed}問・新規審査{generated}問・未審査{len(state["pending"])}問・API {api.calls}/{remaining}回（本日累計{used_today(state)}/{daily_call_cap()}回）')
     if errors:print('最初のエラー:',errors[0])
     return 1 if errors else 0
 
@@ -380,6 +388,8 @@ def write_runtime_status(status, detail='', child_pid=None):
           isinstance(x,dict) and x.get('status')=='AI_PASS' for x in generated.values()),
       'pending_count':len(state.get('pending') or {}),
       'total_calls':state.get('total_calls',0),
+      'today_calls':used_today(state),'today_cap':daily_call_cap(),
+      'today_remaining':max(0,daily_call_cap()-used_today(state)),
       'last_errors':errors[:3],
       'last_phase':live.get('phase','') if status=='RUNNING' else '',
       'next_run':('本日中にエラー再試行予定' if retry_due(state) else ('本日中の再試行済み・翌日実行' if state.get('auto_retry_date')==today() else ('PC起動中に翌日実行' if already_attempted() else 'まもなく開始'))),
@@ -395,7 +405,7 @@ def write_runtime_status(status, detail='', child_pid=None):
     color='#57d6a5' if status=='WAITING' else ('#ffd078' if status in ('RUNNING','STARTING') else '#f09eab')
     latest=esc(data['last_phase'] or detail)
     err=esc(' / '.join(map(str,errors[:2])) if errors else 'なし')
-    page=f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="8"><title>AI Study 稼働状況</title><style>body{{background:#101827;color:#f5f7fc;font:16px/1.7 system-ui,sans-serif;max-width:820px;margin:32px auto;padding:0 16px}}main{{background:#1c2840;border:1px solid #3e5375;border-radius:18px;padding:24px}}h2{{color:{color}}}small{{color:#aab8d0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.cards>div{{background:#111c31;padding:15px;border-radius:12px;flex:1;min-width:130px}}strong{{display:block;font-size:1.4rem}}#signal{{font-weight:bold}}</style></head><body><h1>🎓 AI Study Autopilot</h1><main><small>v{esc(data['version'])}</small><h2>{esc(label)}</h2><p>{latest}</p><div class="cards"><div>既存レビュー<strong>{data['reviewed_count']} / 55</strong></div><div>新規保存<strong>{data['generated_count']}問</strong></div><div>新規 Gemini PASS<strong>{data['generated_pass']}問</strong></div></div><p>次回: {esc(data['next_run'])}</p><p>アプリ同期: {esc(data['sync_status'])}</p><p>直近のエラー: {err}</p><small>生存信号: {esc(data['timestamp'])} / PID {data['watchdog_pid']}</small><p id="signal">生存信号を確認中…</p></main><p><small>8秒ごとに更新。2分間更新がなければ停止・フリーズの疑い。AI PASSはAWS公式確認済みではありません。</small></p><script>const t={int(data['unix_time']*1000)};function check(){{const elapsed=Math.max(0,Date.now()-t),el=document.getElementById('signal');el.textContent=elapsed>120000?'⚠ 生存信号が2分以上更新されていません':('● 生存信号あり '+Math.floor(elapsed/1000)+'秒前');el.style.color=elapsed>120000?'#ffab83':'#57d6a5';}}check();setInterval(check,4000)</script></body></html>'''
+    page=f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="8"><title>AI Study 稼働状況</title><style>body{{background:#101827;color:#f5f7fc;font:16px/1.7 system-ui,sans-serif;max-width:820px;margin:32px auto;padding:0 16px}}main{{background:#1c2840;border:1px solid #3e5375;border-radius:18px;padding:24px}}h2{{color:{color}}}small{{color:#aab8d0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.cards>div{{background:#111c31;padding:15px;border-radius:12px;flex:1;min-width:130px}}strong{{display:block;font-size:1.4rem}}#signal{{font-weight:bold}}</style></head><body><h1>🎓 AI Study Autopilot</h1><main><small>v{esc(data['version'])}</small><h2>{esc(label)}</h2><p>{latest}</p><div class="cards"><div>既存レビュー<strong>{data['reviewed_count']} / 55</strong></div><div>新規保存<strong>{data['generated_count']}問</strong></div><div>新規 Gemini PASS<strong>{data['generated_pass']}問</strong></div></div><p>本日のAPI利用: {data['today_calls']} / {data['today_cap']} 回 (残り {data['today_remaining']} 回)</p><p>次回: {esc(data['next_run'])}</p><p>アプリ同期: {esc(data['sync_status'])}</p><p>直近のエラー: {err}</p><small>生存信号: {esc(data['timestamp'])} / PID {data['watchdog_pid']}</small><p id="signal">生存信号を確認中…</p></main><p><small>8秒ごとに更新。2分間更新がなければ停止・フリーズの疑い。AI PASSはAWS公式確認済みではありません。</small></p><script>const t={int(data['unix_time']*1000)};function check(){{const elapsed=Math.max(0,Date.now()-t),el=document.getElementById('signal');el.textContent=elapsed>120000?'⚠ 生存信号が2分以上更新されていません':('● 生存信号あり '+Math.floor(elapsed/1000)+'秒前');el.style.color=elapsed>120000?'#ffab83':'#57d6a5';}}check();setInterval(check,4000)</script></body></html>'''
     tmp=DASHBOARD.with_suffix('.html.tmp')
     tmp.write_text(page,encoding='utf-8')
     tmp.replace(DASHBOARD)
