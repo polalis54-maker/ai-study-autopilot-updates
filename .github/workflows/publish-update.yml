@@ -50,6 +50,8 @@ jobs:
         run: python3 tests/test_release.py
       - name: Verify 200 Gemini-PASS goal and date-scoped 300-call budget
         run: python3 tests/test_campaign.py
+      - name: Test Netlify mobile PWA publishing safely offline
+        run: python3 tests/test_mobile.py
       - name: Package and checksum permitted files
         id: package
         shell: bash
