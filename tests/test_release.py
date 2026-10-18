@@ -29,7 +29,10 @@ class FakeA:
 a=FakeA()
 scope={"a":a,"json":json,"urllib":urllib,"CALL_CAP":25,
        "ONE_TIME_EXTRA_DATE":"2026-10-18","ONE_TIME_EXTRA_LIMIT":50}
-subset=[functions[x] for x in
+declarations = [node for node in tree.body if isinstance(node,ast.Assign)
+                and any(isinstance(t,ast.Name) and t.id in ("FIELDS","SCHEMA")
+                        for t in node.targets)]
+subset=declarations+[functions[x] for x in
     ("daily_call_cap","used_today","fix_retry_due","structured_batch_call","salvage_batch")]
 module=ast.fix_missing_locations(ast.Module(body=subset,type_ignores=[]))
 exec(compile(module,str(p),"exec"),scope)
