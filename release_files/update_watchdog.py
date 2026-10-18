@@ -25,7 +25,7 @@ GENERATION_MODEL='gpt-4.1-mini'
 GOAL_TOTAL=200
 GEN_DAILY=200
 CAMPAIGN_START='2026-10-19'
-CAMPAIGN_DAILY_CAP=100
+CAMPAIGN_DAILY_CAP=300
 # Optional repairs stay disabled until HTTP 400 is diagnosed.
 # Pause optional OpenAI rewriter until its HTTP 400 path is diagnosed.
 # Never block the already Gemini-reviewed valid questions.
@@ -419,7 +419,7 @@ def run_fast(*,demo=False,force=False,generate_only=False):
             state['campaign_paused_date']=a.today()
             print('Gemini PASSが増えなかったため本日の連続実行を停止',flush=True)
 
-        state['history']=state['history'][-60:]
+        state['history']=state['history'][-1200:]
         checkpoint();a.build_pack(state);a.produce_report(state)
         a.jwrite(a.OUT/'last_result.json',state['history'][-1])
     progress('ERROR' if errors else 'COMPLETE','高速処理終了',errors[0] if errors else f'既存{reviewed}件・新規{generated}件')
