@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 
 ROOT = Path(__file__).resolve().parent
 WORK = ROOT / 'work'
@@ -55,9 +56,25 @@ def inspect():
     reviewed_pass = sum(v.get('status') == 'AI_PASS' for v in existing.values() if isinstance(v, dict))
     generated_pass = sum(v.get('status') == 'AI_PASS' for v in generated.values() if isinstance(v, dict))
     lock = holding_background_lock()
+    runtime = read_json(OUT/'runtime_status.json')
+    stamp = runtime.get('unix_time')
+    age = time.time()-stamp if isinstance(stamp,(int,float)) else None
     print('=== AI Study Autopilot 稼働確認（API料金ゼロ） ===')
     print('現在のローカル版: v' + str(version))
-    print('自動実行:', '起動中（待機中の場合あり）' if lock else ('停止中' if lock is False else '判定できません'))
+    if lock is False:
+        print('現在の稼働状態: 停止中（バックグラウンドプロセスなし）')
+    elif lock is True and runtime and age is not None and 0<=age<=120:
+        labels={'RUNNING':'● 生成・レビュー中','WAITING':'● 待機中（正常）',
+                'ERROR_WAITING':'! 前回エラーあり・待機中','STARTING':'● 起動中','STOPPED':'! 停止中'}
+        print('現在の稼働状態:',labels.get(runtime.get('status'),'確認中'))
+        print('生存信号: %d秒前 / PID %s'%(int(age),runtime.get('watchdog_pid','?')))
+        if runtime.get('status')=='RUNNING':
+            print('実行中:',runtime.get('last_phase') or runtime.get('detail'))
+    elif lock is True:
+        print('現在の稼働状態: 常駐中だが新しい生存信号なし')
+        print('更新済みでも旧プロセスが動いている可能性があります。再起動で新機能が有効に。')
+    else:
+        print('現在の稼働状態: 判定不能')
     print('既存問題レビュー: %d / 55（AI PASS %d）' % (len(existing), reviewed_pass))
     print('新規生成保存: %d（AI PASS %d）' % (len(generated), generated_pass))
     print('形式エラー等で未保存: %d（累計記録）' % len(failed))
@@ -84,7 +101,9 @@ def inspect():
     if schedule:
         print('\n--- バックグラウンド処理ログ ---')
         for line in schedule: print('  ' + line[:240])
-    if (OUT/'live_progress.html').exists():
+    if (OUT/'runtime_status.html').exists():
+        print('最新稼働画面: OPEN_LIVE_STATUS.cmd で開けます')
+    elif (OUT/'live_progress.html').exists():
         print('\nリアルタイム進捗: OPEN_LIVE_STATUS.cmd から開けます。')
     print('注意: AI PASSは公式資料で正確性を確認した意味ではありません。')
     print('=== 確認終了 ===')
