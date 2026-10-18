@@ -85,6 +85,23 @@ def judge(api,qs):
             if attempt:raise
     return {}
 
+def used_today(state):
+    """Total API requests across all completed runs on this date."""
+    return sum(max(0, h['calls']) for h in state.get('history', [])
+               if isinstance(h, dict) and h.get('date') == a.today()
+               and type(h.get('calls')) is int)
+
+
+def retry_due(state):
+    """Automatic same-day retry: once only, under the existing daily request cap."""
+    if state.get('last_attempt') != a.today():
+        return False
+    if state.get('auto_retry_date') == a.today():
+        return False
+    entries=[h for h in state.get('history',[]) if isinstance(h,dict) and h.get('date')==a.today()]
+    return bool(entries and entries[-1].get('errors') and CALL_CAP-used_today(state)>=4)
+
+
 def run_fast(*,demo=False,force=False):
     if a.today()>CUTOFF and not demo:
         print('10/28を過ぎたため生成停止');return 0
@@ -95,11 +112,14 @@ def run_fast(*,demo=False,force=False):
     state.setdefault('failed_generations',{})
     if not demo and state['last_attempt']==a.today() and not force:
         print('今日は既に実行済み。API呼び出しなし');return 0
+    remaining=CALL_CAP if demo else max(0,CALL_CAP-used_today(state))
+    if not demo and remaining<4:
+        print(f'本日のAPI残枠不足: {remaining}回。追加呼び出しなし。');return 0
     keys=('', '') if demo else a.load_keys()
     if not demo:
         state['last_attempt']=a.today()
         a.jwrite(a.STATEFILE,state)
-    api=API(*keys,limit=CALL_CAP,demo=demo)
+    api=API(*keys,limit=remaining,demo=demo)
     log=[];errors=[];reviewed=0;generated=0
     def checkpoint():
         if not demo:a.jwrite(a.STATEFILE,state)
@@ -136,7 +156,7 @@ def run_fast(*,demo=False,force=False):
     try:
         missing=[q for q in existing if q['id'] not in state['existing'] and q['id'] not in state['generated']][:REV_DAILY]
         for start in range(0,len(missing),GROUP):
-            if api.calls+2>CALL_CAP:break
+            if api.calls+2>api.limit:break
             group=missing[start:start+GROUP]
             progress('RUNNING','Gemini既存レビュー',str([q['id'] for q in group]))
             results=review_safe(group)
@@ -149,7 +169,7 @@ def run_fast(*,demo=False,force=False):
         # Resume previously generated but never-reviewed proposals first.
         pending_ids=list(state['pending'])
         for start in range(0,len(pending_ids),GROUP):
-            if api.calls+2>CALL_CAP:break
+            if api.calls+2>api.limit:break
             group=[state['pending'][i] for i in pending_ids[start:start+GROUP] if i in state['pending']]
             if not group:continue
             results=review_safe(group)
@@ -158,7 +178,7 @@ def run_fast(*,demo=False,force=False):
                     keep(q,results[q['id']],'generated');state['pending'].pop(q['id'],None);generated+=1
             checkpoint()
         attempted=0
-        while attempted<GEN_DAILY and api.calls+4<=CALL_CAP:
+        while attempted<GEN_DAILY and api.calls+4<=api.limit:
             group=specs_for(state,min(GROUP,GEN_DAILY-attempted))
             progress('RUNNING','OpenAI一括生成',str([s['id'] for s in group]))
             proposals=make_safe(group)
@@ -175,7 +195,7 @@ def run_fast(*,demo=False,force=False):
             progress('RUNNING','Gemini新規レビュー',f'今回{generated}問')
         # Fix weak or REVISE-flagged *new* questions once, then ask Gemini again.
         for qid, entry in list(state['generated'].items())[-GEN_DAILY:]:
-            if api.calls+3>CALL_CAP:break
+            if api.calls+3>api.limit:break
             if entry['status'] not in ('REVISE_UNRESOLVED','NEEDS_QUALITY_UPGRADE'):continue
             r=entry['audit'][0]['review']
             if r['verdict']=='PASS':
@@ -206,7 +226,7 @@ def run_fast(*,demo=False,force=False):
         checkpoint();a.build_pack(state);a.produce_report(state)
         a.jwrite(a.OUT/'last_result.json',state['history'][-1])
     progress('ERROR' if errors else 'COMPLETE','高速処理終了',errors[0] if errors else f'既存{reviewed}件・新規{generated}件')
-    print(f'処理結果: 既存レビュー{reviewed}問・新規審査{generated}問・未審査{len(state["pending"])}問・API {api.calls}/{CALL_CAP}回')
+    print(f'処理結果: 既存レビュー{reviewed}問・新規審査{generated}問・未審査{len(state["pending"])}問・API {api.calls}/{remaining}回（本日累計{used_today(state)}/{CALL_CAP}回）')
     if errors:print('最初のエラー:',errors[0])
     return 1 if errors else 0
 
@@ -245,7 +265,7 @@ def write_runtime_status(status, detail='', child_pid=None):
       'total_calls':state.get('total_calls',0),
       'last_errors':errors[:3],
       'last_phase':live.get('phase','') if status=='RUNNING' else '',
-      'next_run':'PC起動中に翌日実行' if already_attempted() else 'まもなく開始',
+      'next_run':('本日中にエラー再試行予定' if retry_due(state) else ('本日中の再試行済み・翌日実行' if state.get('auto_retry_date')==today() else ('PC起動中に翌日実行' if already_attempted() else 'まもなく開始'))),
       'sync_status':_read_obj(ROOT/'work'/'outputs'/'study_sync_status.json').get('status','未記録')}
     RUNTIME.parent.mkdir(parents=True,exist_ok=True)
     tmp=RUNTIME.with_suffix('.json.tmp')
@@ -268,11 +288,16 @@ def already_attempted():
     try:return json.loads((ROOT/'work'/'state.json').read_text(encoding='utf-8')).get('last_attempt')==today()
     except (OSError,ValueError,TypeError):return False
 
-def run_daily():
+def run_daily(*, retry=False):
+    if retry:
+        # Reserve the one allowed automatic retry before launching a child.
+        state=_read_obj(ROOT/'work'/'state.json')
+        state['auto_retry_date']=today()
+        a.jwrite(ROOT/'work'/'state.json',state)
     LOG.parent.mkdir(parents=True,exist_ok=True)
     with LOG.open('a',encoding='utf-8') as log:
-        log.write('\n=== '+datetime.datetime.now().isoformat(timespec='seconds')+' / 高速バッチ ===\n');log.flush()
-        proc=subprocess.Popen([sys.executable,str(ROOT/'update_watchdog.py'),'batch-once'],
+        log.write('\n=== '+datetime.datetime.now().isoformat(timespec='seconds')+(' / エラー再試行 ===\n' if retry else ' / 高速バッチ ===\n'));log.flush()
+        proc=subprocess.Popen([sys.executable,str(ROOT/'update_watchdog.py'),'batch-retry' if retry else 'batch-once'],
                               cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
         while True:
             write_runtime_status('RUNNING','OpenAI生成・Geminiレビューを実行中',child_pid=proc.pid)
@@ -304,6 +329,7 @@ def scheduler(checker=ua.check_and_apply, *, iterations=None, sleep=time.sleep):
                 except Exception as exc:ua.log('更新確認失敗（生成は継続）: '+str(exc))
                 next_update=now+UPDATE_INTERVAL_SEC
             if not already_attempted():run_daily()
+            elif retry_due(_read_obj(ROOT/'work'/'state.json')):run_daily(retry=True)
             write_runtime_status('WAITING','本日の処理は完了。次回実行を待機中')
             checks+=1
             if iterations is not None and checks>=iterations:break
@@ -321,6 +347,8 @@ if __name__=='__main__':
     if sys.argv[1:]==['batch-once']:
         sys.exit(run_fast())
     if sys.argv[1:]==['batch-force']:
+        sys.exit(run_fast(force=True))
+    if sys.argv[1:]==['batch-retry']:
         sys.exit(run_fast(force=True))
     if len(sys.argv)>1:
         print('Unknown argument');sys.exit(2)
