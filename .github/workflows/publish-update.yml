@@ -1,0 +1,75 @@
+name: Publish AI Study Autopilot update
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'release_files/VERSION.json'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ai-study-autopilot-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted release source
+        uses: actions/checkout@v4
+      - name: Package and checksum permitted files
+        id: package
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, pathlib, re, zipfile, os
+          root = pathlib.Path("release_files")
+          meta = json.loads((root / "VERSION.json").read_text(encoding="utf-8"))
+          assert meta.get("product") == "ai-study-autopilot", "Unexpected product"
+          version = meta["version"]
+          assert re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version), "Bad version"
+          allowed = {"VERSION.json", "CHECK_RUNNING.cmd", "autopilot.py", "live_progress.py",
+                     "check_running.py", "RUN_RETRY_GENERATE.cmd", "OPEN_LIVE_STATUS.cmd",
+                     "RUN_BACKGROUND.cmd", "START_AUTOPILOT.cmd", "ENABLE_AUTORUN.cmd",
+                     "DISABLE_AUTORUN.cmd", "RUN_DAILY.cmd", "RUN_ONCE.cmd",
+                     "daemon.py", "install_autorun.py", "update_agent.py", "update_watchdog.py"}
+          names = {p.name for p in root.iterdir() if p.is_file()}
+          assert names <= allowed and names >= {"VERSION.json"}, "Unknown or missing package file"
+          assert len(names) <= len(allowed)
+          data = {name: (root / name).read_bytes() for name in sorted(names)}
+          assert sum(map(len, data.values())) < 8 * 1024 * 1024, "Files too large"
+          out = pathlib.Path("dist")
+          out.mkdir(exist_ok=True)
+          archive = out / "ai-study-autopilot-update.zip"
+          with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as z:
+              for name, blob in data.items():
+                  z.writestr(name, blob)
+          manifest = {"product": meta["product"], "version": version,
+                      "archive": archive.name,
+                      "archive_sha256": hashlib.sha256(archive.read_bytes()).hexdigest(),
+                      "files": {name: hashlib.sha256(blob).hexdigest() for name, blob in data.items()}}
+          (out / "ai-study-autopilot-manifest.json").write_text(
+              json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"version={version}\n")
+          print(f"Release v{version}: {len(names)} files; ZIP SHA256 {manifest['archive_sha256']}")
+          PY
+      - name: Publish GitHub Release with both verified assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            echo "::error::Release v$VERSION exists. Increment VERSION.json to publish a new immutable release."
+            exit 1
+          fi
+          gh release create "v$VERSION" \
+            dist/ai-study-autopilot-update.zip \
+            dist/ai-study-autopilot-manifest.json \
+            --title "AI Study Autopilot v$VERSION" \
+            --notes "Windows自動更新配信。差分はZIP内の許可されたファイルのみ。work/・AI_Study/・APIキーは含みません。" \
+            --latest
