@@ -5,6 +5,7 @@ The watched machine must be awake. No deployment to Netlify; no secret uploads.
 from __future__ import annotations
 import datetime, html, json, os, subprocess, sys, time
 from pathlib import Path
+from batch_generator import structured_batch_call, salvage_batch
 import autopilot as a
 import update_agent as ua
 
@@ -24,6 +25,11 @@ G_PROMPT='''AWS SAA-C03のオリジナル日本語模擬試験を生成。specs�
 R_PROMPT=a.REVIEW_PROMPT.split('JSONオブジェクトだけ返答:')[0]+'''\n各questionsを独立かつ厳格にレビュー。全問題IDについて回答し、資料を調べたと偽らない。JSONのみ: {"reviews":[{"id":"指定ID","verdict":"PASS|REVISE|BLOCK","issues":[],"notes":"...","needs_official_verification":true,"exam_quality":{"distractor_quality":3,"scenario_realism":3,"explanation_depth":3,"difficulty_alignment":3,"reason":"..."}}]}'''
 
 class API(a.Clients):
+    def call(self, provider, prompt, payload):
+        if provider=='openai' and prompt==G_PROMPT and not self.demo:
+            return structured_batch_call(self,prompt,payload)
+        return super().call(provider,prompt,payload)
+
     def fake(self, provider, prompt, payload):
         if prompt==G_PROMPT:
             qs=[]
@@ -69,6 +75,10 @@ def make(api,specs):
         except (ValueError,KeyError,TypeError):
             if attempt:raise
     return []
+
+# Validate each generated question separately; preserve valid neighbors.
+def make(api,specs):
+    return salvage_batch(api,specs,G_PROMPT)
 
 def judge(api,qs):
     for attempt in range(2):
@@ -145,13 +155,28 @@ def run_fast(*,demo=False,force=False):
             cut=len(group)//2
             return {**review_safe(group[:cut]),**review_safe(group[cut:])}
     def make_safe(group):
-        try:return make(api,group)
+        try:
+            valid=make(api,group)
         except (ValueError,TypeError,KeyError) as exc:
-            if len(group)==1:
-                state['failed_generations'][group[0]['id']]={'date':a.today(),'reason':str(exc)[:200]}
-                errors.append(group[0]['id']+': 生成形式不備: '+str(exc)[:150]);return []
-            cut=len(group)//2
-            return make_safe(group[:cut])+make_safe(group[cut:])
+            valid=[]
+            errors.append('生成応答形式エラー: '+str(exc)[:150])
+        found={q['id'] for q in valid}
+        missing=[spec for spec in group if spec['id'] not in found]
+        # Keep enough request budget for Gemini to review any salvaged item.
+        if missing and len(group)>1 and api.calls+3<=api.limit:
+            try:
+                extra=make(api,missing)
+                valid.extend(extra)
+                found.update(q['id'] for q in extra)
+            except (ValueError,TypeError,KeyError) as exc:
+                errors.append('不足分の生成失敗: '+str(exc)[:150])
+        for spec in missing:
+            if spec['id'] not in found:
+                state['failed_generations'][spec['id']]={
+                    'date':a.today(),'reason':'問題の形式不備または生成数不足'}
+                errors.append(spec['id']+': 形式不備で未採用')
+        if missing:checkpoint()
+        return valid
     progress('RUNNING','既存レビューと新規問題生成を開始')
     try:
         missing=[q for q in existing if q['id'] not in state['existing'] and q['id'] not in state['generated']][:REV_DAILY]
