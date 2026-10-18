@@ -321,6 +321,8 @@ def run_fast(*,demo=False,force=False,generate_only=False):
         for qid, entry in list(state['generated'].items())[-GEN_DAILY:]:
             if api.calls+3>api.limit:break
             if entry['status'] not in ('REVISE_UNRESOLVED','NEEDS_QUALITY_UPGRADE'):continue
+            if entry.get('repair_deferred'):
+                continue  # Do not waste tomorrow's API budget on a known rejected repair request.
             r=entry['audit'][0]['review']
             if r['verdict']=='PASS':
                 r=dict(r,verdict='REVISE',issues=[{
@@ -337,6 +339,14 @@ def run_fast(*,demo=False,force=False,generate_only=False):
                 if again['verdict']=='PASS' and a.meets_exam_quality(again):
                     entry['candidate']=candidate;entry['status']='AI_PASS'
                 elif again['verdict']=='BLOCK':entry['status']='BLOCKED'
+                checkpoint()
+            except RuntimeError as exc:
+                # The original question remains staged as unapproved. Never let a
+                # nonessential repair HTTP failure abort the whole batch.
+                entry['repair_deferred']=True
+                entry['audit'].append({'role':'openai','action':'repair_deferred_http_error',
+                                       'reason':str(exc)[:170]})
+                print('[FAST][WARN] 任意の修正API失敗。問題を保留して続行: '+qid,flush=True)
                 checkpoint()
             except (ValueError,KeyError,TypeError) as exc:
                 entry['audit'].append({'role':'openai','action':'fix_rejected','reason':str(exc)[:170]})
