@@ -20,7 +20,13 @@ CUTOFF='2026-10-28'
 GROUP=2
 # Draft-only model: no reasoning-token overhead. Gemini remains independent reviewer.
 GENERATION_MODEL='gpt-4.1-mini'
-GEN_DAILY=20
+# Count goal as 55 existing questions plus Gemini-approved new candidates.
+# Existing questions are NOT automatically AWS-official-verified.
+GOAL_TOTAL=200
+GEN_DAILY=200
+CAMPAIGN_START='2026-10-19'
+CAMPAIGN_DAILY_CAP=100
+# Optional repairs stay disabled until HTTP 400 is diagnosed.
 # Pause optional OpenAI rewriter until its HTTP 400 path is diagnosed.
 # Never block the already Gemini-reviewed valid questions.
 ENABLE_OPTIONAL_REPAIR=False
@@ -32,7 +38,11 @@ ONE_TIME_EXTRA_LIMIT=50
 def daily_call_cap(day=None):
     # Temporary consent: 2026-10-18 only. All other dates stay at 25.
     day=a.today() if day is None else day
-    return ONE_TIME_EXTRA_LIMIT if day==ONE_TIME_EXTRA_DATE else CALL_CAP
+    if day==ONE_TIME_EXTRA_DATE:
+        return ONE_TIME_EXTRA_LIMIT
+    if CAMPAIGN_START<=day<=CUTOFF:
+        return CAMPAIGN_DAILY_CAP
+    return CALL_CAP
 
 
 G_PROMPT='''AWS SAA-C03のオリジナル日本語模擬試験を生成。specsと同じ件数を返す。中〜上級の実務シナリオ。可用性・コスト・運用負荷・DRなどの制約を2つ以上含め、誤答ももっともらしく。全選択肢の正誤理由を解説。公式問題を転載しない。JSONのみ: {"questions":[{"id":"指定ID","exam":"SAA-C03","domain":"D1","topic":"...","type":"single","question":"...","choices":{"A":"...","B":"...","C":"...","D":"..."},"correct":["A"],"explanation":"...","difficulty":"中級","language":"ja","review_status":"ai_review_pending","source":{"kind":"original","label":"AI Study Auto-generated / AI review pending"}}]} singleは4択1正解、multipleは5択2正解で問題文に「2つ選択」を明記。すべてのIDと属性を守り、省略しない。'''
@@ -177,6 +187,44 @@ def judge(api,qs):
             if attempt:raise
     return {}
 
+def count_approved(state):
+    generated=state.get('generated') or {}
+    return sum(isinstance(v,dict) and v.get('status')=='AI_PASS'
+               for v in generated.values())
+
+
+def base_count():
+    # The local PWA may already contain imported SAA-AUTO records.
+    # Exclude them to avoid counting the same question twice.
+    try:
+        original=a.jread(a.STUDY_FILE)['questions']
+        return len({q['id'] for q in original
+                    if isinstance(q,dict) and isinstance(q.get('id'),str)
+                    and not q['id'].startswith('SAA-AUTO-')})
+    except (OSError,KeyError,ValueError,TypeError):
+        return 55
+
+
+def goal_progress(state):
+    return base_count()+count_approved(state)
+
+
+def campaign_due(state):
+    day=a.today()
+    if not (CAMPAIGN_START<=day<=CUTOFF):
+        return False
+    if goal_progress(state)>=GOAL_TOTAL:
+        return False
+    if state.get('campaign_paused_date')==day:
+        return False
+    if daily_call_cap()-used_today(state)<4:
+        return False
+    # Do not launch another batch until this day's prior run is fully committed.
+    return bool(state.get('last_attempt')==day and
+                any(isinstance(h,dict) and h.get('date')==day
+                    for h in state.get('history',[])))
+
+
 def used_today(state):
     """Total API requests across all completed runs on this date."""
     return sum(max(0, h['calls']) for h in state.get('history', [])
@@ -215,6 +263,9 @@ def run_fast(*,demo=False,force=False,generate_only=False):
     state=a.jread(a.STATEFILE,a.state_default())
     state.setdefault('pending',{})
     state.setdefault('failed_generations',{})
+    if goal_progress(state)>=GOAL_TOTAL:
+        print('目標到達: Gemini PASSを含む全200問に到達。追加API利用なし。',flush=True)
+        return 0
     if not demo and state['last_attempt']==a.today() and not force:
         print('今日は既に実行済み。API呼び出しなし');return 0
     remaining=daily_call_cap() if demo else max(0,daily_call_cap()-used_today(state))
@@ -226,6 +277,7 @@ def run_fast(*,demo=False,force=False,generate_only=False):
         a.jwrite(a.STATEFILE,state)
     api=API(*keys,limit=remaining,demo=demo)
     log=[];errors=[];reviewed=0;generated=0
+    before_pass=count_approved(state)
     def checkpoint():
         if not demo:a.jwrite(a.STATEFILE,state)
     def progress(status,phase,details=''):
@@ -279,7 +331,7 @@ def run_fast(*,demo=False,force=False,generate_only=False):
                 errors.append(spec['id']+': 形式不備または未完了で未採用')
         if missing:checkpoint()
         return valid
-    progress('RUNNING','既存レビューと新規問題生成を開始')
+    progress('RUNNING','目標200問までバッチ作成を開始')
     try:
         missing=[] if generate_only else [q for q in existing if q['id'] not in state['existing'] and q['id'] not in state['generated']][:REV_DAILY]
         for start in range(0,len(missing),GROUP):
@@ -305,8 +357,10 @@ def run_fast(*,demo=False,force=False,generate_only=False):
                     keep(q,results[q['id']],'generated');state['pending'].pop(q['id'],None);generated+=1
             checkpoint()
         attempted=0
-        while attempted<GEN_DAILY and api.calls+4<=api.limit:
-            group=specs_for(state,min(GROUP,GEN_DAILY-attempted))
+        while (attempted<GEN_DAILY and api.calls+4<=api.limit
+               and goal_progress(state)<GOAL_TOTAL):
+            group=specs_for(state,min(GROUP,GEN_DAILY-attempted,
+                                      GOAL_TOTAL-goal_progress(state)))
             progress('RUNNING','OpenAI一括生成',str([s['id'] for s in group]))
             proposals=make_safe(group)
             state['generated_index']+=len(group);attempted+=len(group)
@@ -358,12 +412,23 @@ def run_fast(*,demo=False,force=False,generate_only=False):
         errors.append(type(exc).__name__+': '+str(exc)[:220])
     if not demo:
         state['total_calls']+=api.calls
-        state['history'].append({'date':a.today(),'mode':'fast_daily','calls':api.calls,'items':log,'errors':errors})
+        new_pass=count_approved(state)-before_pass
+        state['history'].append({'date':a.today(),'mode':'continuous_200',
+                                 'calls':api.calls,'items':log,'errors':errors,
+                                 'new_pass':new_pass,'new_reviewed':generated,
+                                 'goal_progress':goal_progress(state)})
+        # Stop repeated loops with zero useful approvals. Keep the current
+        # proposals and retry on the following day with a fresh budget.
+        if generate_only and new_pass<=0 and api.calls>=4:
+            state['campaign_paused_date']=a.today()
+            print('Gemini PASSが増えなかったため本日の連続実行を停止',flush=True)
+
         state['history']=state['history'][-60:]
         checkpoint();a.build_pack(state);a.produce_report(state)
         a.jwrite(a.OUT/'last_result.json',state['history'][-1])
     progress('ERROR' if errors else 'COMPLETE','高速処理終了',errors[0] if errors else f'既存{reviewed}件・新規{generated}件')
-    print(f'処理結果: 既存レビュー{reviewed}問・新規審査{generated}問・未審査{len(state["pending"])}問・API {api.calls}/{remaining}回（本日累計{used_today(state)}/{daily_call_cap()}回）')
+    print(f'処理結果: 既存レビュー{reviewed}問・新規審査{generated}問・未審査{len(state["pending"])}問 / 目標 {goal_progress(state)}/{GOAL_TOTAL}問（Gemini PASS+既存）',flush=True)
+    print(f'API {api.calls}/{remaining}回（本日累計{used_today(state)}/{daily_call_cap()}回）',flush=True)
     if errors:print('最初のエラー:',errors[0])
     return 1 if errors else 0
 
@@ -399,12 +464,17 @@ def write_runtime_status(status, detail='', child_pid=None):
       'generated_count':len(generated),'generated_pass':sum(
           isinstance(x,dict) and x.get('status')=='AI_PASS' for x in generated.values()),
       'pending_count':len(state.get('pending') or {}),
+      'goal_total':GOAL_TOTAL,'goal_progress':goal_progress(state),
+      'goal_remaining':max(0,GOAL_TOTAL-goal_progress(state)),
       'total_calls':state.get('total_calls',0),
       'today_calls':used_today(state),'today_cap':daily_call_cap(),
       'today_remaining':max(0,daily_call_cap()-used_today(state)),
       'last_errors':errors[:3],
       'last_phase':live.get('phase','') if status=='RUNNING' else '',
-      'next_run':('今夜の残り枠で新規生成を再開予定' if fix_retry_due(state) else ('本日中にエラー再試行予定' if retry_due(state) else ('本日中の再試行済み・翌日実行' if state.get('auto_retry_date')==today() else ('PC起動中に翌日実行' if already_attempted() else 'まもなく開始')))),
+      'next_run':('目標200問到達・生成完了' if goal_progress(state)>=GOAL_TOTAL else
+                  ('本日の残り枠で追加生成予定' if campaign_due(state) else
+                   ('本日の生成停止・次回は翌日' if a.today()>=CAMPAIGN_START and a.today()<=CUTOFF and already_attempted() else
+                    ('今夜の残り枠で新規生成を再開予定' if fix_retry_due(state) else ('本日中にエラー再試行予定' if retry_due(state) else ('本日中の再試行済み・翌日実行' if state.get('auto_retry_date')==today() else ('PC起動中に翌日実行' if already_attempted() else 'まもなく開始'))))))),
       'sync_status':_read_obj(ROOT/'work'/'outputs'/'study_sync_status.json').get('status','未記録')}
     RUNTIME.parent.mkdir(parents=True,exist_ok=True)
     tmp=RUNTIME.with_suffix('.json.tmp')
@@ -417,7 +487,7 @@ def write_runtime_status(status, detail='', child_pid=None):
     color='#57d6a5' if status=='WAITING' else ('#ffd078' if status in ('RUNNING','STARTING') else '#f09eab')
     latest=esc(data['last_phase'] or detail)
     err=esc(' / '.join(map(str,errors[:2])) if errors else 'なし')
-    page=f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="8"><title>AI Study 稼働状況</title><style>body{{background:#101827;color:#f5f7fc;font:16px/1.7 system-ui,sans-serif;max-width:820px;margin:32px auto;padding:0 16px}}main{{background:#1c2840;border:1px solid #3e5375;border-radius:18px;padding:24px}}h2{{color:{color}}}small{{color:#aab8d0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.cards>div{{background:#111c31;padding:15px;border-radius:12px;flex:1;min-width:130px}}strong{{display:block;font-size:1.4rem}}#signal{{font-weight:bold}}</style></head><body><h1>🎓 AI Study Autopilot</h1><main><small>v{esc(data['version'])}</small><h2>{esc(label)}</h2><p>{latest}</p><div class="cards"><div>既存レビュー<strong>{data['reviewed_count']} / 55</strong></div><div>新規保存<strong>{data['generated_count']}問</strong></div><div>新規 Gemini PASS<strong>{data['generated_pass']}問</strong></div></div><p>本日のAPI利用: {data['today_calls']} / {data['today_cap']} 回 (残り {data['today_remaining']} 回)</p><p>次回: {esc(data['next_run'])}</p><p>アプリ同期: {esc(data['sync_status'])}</p><p>直近のエラー: {err}</p><small>生存信号: {esc(data['timestamp'])} / PID {data['watchdog_pid']}</small><p id="signal">生存信号を確認中…</p></main><p><small>8秒ごとに更新。2分間更新がなければ停止・フリーズの疑い。AI PASSはAWS公式確認済みではありません。</small></p><script>const t={int(data['unix_time']*1000)};function check(){{const elapsed=Math.max(0,Date.now()-t),el=document.getElementById('signal');el.textContent=elapsed>120000?'⚠ 生存信号が2分以上更新されていません':('● 生存信号あり '+Math.floor(elapsed/1000)+'秒前');el.style.color=elapsed>120000?'#ffab83':'#57d6a5';}}check();setInterval(check,4000)</script></body></html>'''
+    page=f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="8"><title>AI Study 稼働状況</title><style>body{{background:#101827;color:#f5f7fc;font:16px/1.7 system-ui,sans-serif;max-width:820px;margin:32px auto;padding:0 16px}}main{{background:#1c2840;border:1px solid #3e5375;border-radius:18px;padding:24px}}h2{{color:{color}}}small{{color:#aab8d0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.cards>div{{background:#111c31;padding:15px;border-radius:12px;flex:1;min-width:130px}}strong{{display:block;font-size:1.4rem}}#signal{{font-weight:bold}}</style></head><body><h1>🎓 AI Study Autopilot</h1><main><small>v{esc(data['version'])}</small><h2>{esc(label)}</h2><p>{latest}</p><div class="cards"><div>既存レビュー<strong>{data['reviewed_count']} / 55</strong></div><div>新規保存<strong>{data['generated_count']}問</strong></div><div>新規 Gemini PASS<strong>{data['generated_pass']}問</strong></div></div><p><strong>品質審査済み問題: {data['goal_progress']} / {data['goal_total']} 問</strong></p><p>目標まで残り {data['goal_remaining']} 問。新規 Gemini PASS {data['generated_pass']} 問</p><p>本日のAPI利用: {data['today_calls']} / {data['today_cap']} 回 (残り {data['today_remaining']} 回)</p><p>次回: {esc(data['next_run'])}</p><p>アプリ同期: {esc(data['sync_status'])}</p><p>直近のエラー: {err}</p><small>生存信号: {esc(data['timestamp'])} / PID {data['watchdog_pid']}</small><p id="signal">生存信号を確認中…</p></main><p><small>8秒ごとに更新。2分間更新がなければ停止・フリーズの疑い。AI PASSはAWS公式確認済みではありません。</small></p><script>const t={int(data['unix_time']*1000)};function check(){{const elapsed=Math.max(0,Date.now()-t),el=document.getElementById('signal');el.textContent=elapsed>120000?'⚠ 生存信号が2分以上更新されていません':('● 生存信号あり '+Math.floor(elapsed/1000)+'秒前');el.style.color=elapsed>120000?'#ffab83':'#57d6a5';}}check();setInterval(check,4000)</script></body></html>'''
     tmp=DASHBOARD.with_suffix('.html.tmp')
     tmp.write_text(page,encoding='utf-8')
     tmp.replace(DASHBOARD)
@@ -427,7 +497,7 @@ def already_attempted():
     try:return json.loads((ROOT/'work'/'state.json').read_text(encoding='utf-8')).get('last_attempt')==today()
     except (OSError,ValueError,TypeError):return False
 
-def run_daily(*, retry=False, post_fix=False):
+def run_daily(*, retry=False, post_fix=False, campaign=False):
     if retry:
         # Reserve the one allowed automatic retry before launching a child.
         state=_read_obj(ROOT/'work'/'state.json')
@@ -438,7 +508,7 @@ def run_daily(*, retry=False, post_fix=False):
     LOG.parent.mkdir(parents=True,exist_ok=True)
     with LOG.open('a',encoding='utf-8') as log:
         log.write('\n=== '+datetime.datetime.now().isoformat(timespec='seconds')+(' / エラー再試行 ===\n' if retry else ' / 高速バッチ ===\n'));log.flush()
-        proc=subprocess.Popen([sys.executable,str(ROOT/'update_watchdog.py'),'batch-new-only' if post_fix else ('batch-retry' if retry else 'batch-once')],
+        proc=subprocess.Popen([sys.executable,str(ROOT/'update_watchdog.py'),'batch-new-only' if (post_fix or campaign) else ('batch-retry' if retry else 'batch-once')],
                               cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
         while True:
             write_runtime_status('RUNNING','OpenAI生成・Geminiレビューを実行中',child_pid=proc.pid)
@@ -469,7 +539,10 @@ def scheduler(checker=ua.check_and_apply, *, iterations=None, sleep=time.sleep):
                     previous_result=result
                 except Exception as exc:ua.log('更新確認失敗（生成は継続）: '+str(exc))
                 next_update=now+UPDATE_INTERVAL_SEC
-            if not already_attempted():run_daily()
+            if goal_progress(_read_obj(ROOT/'work'/'state.json'))>=GOAL_TOTAL:
+                write_runtime_status('WAITING','目標200問に到達。生成を停止')
+            elif not already_attempted():run_daily()
+            elif campaign_due(_read_obj(ROOT/'work'/'state.json')):run_daily(campaign=True)
             elif fix_retry_due(_read_obj(ROOT/'work'/'state.json')):run_daily(retry=True,post_fix=True)
             elif retry_due(_read_obj(ROOT/'work'/'state.json')):run_daily(retry=True)
             write_runtime_status('WAITING','本日の処理は完了。次回実行を待機中')
