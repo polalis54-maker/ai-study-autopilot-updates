@@ -134,7 +134,7 @@ def run_fast(*,demo=False,force=False):
             return make_safe(group[:cut])+make_safe(group[cut:])
     progress('RUNNING','既存レビューと新規問題生成を開始')
     try:
-        missing=[q for q in existing if q['id'] not in state['existing']][:REV_DAILY]
+        missing=[q for q in existing if q['id'] not in state['existing'] and q['id'] not in state['generated']][:REV_DAILY]
         for start in range(0,len(missing),GROUP):
             if api.calls+2>CALL_CAP:break
             group=missing[start:start+GROUP]
