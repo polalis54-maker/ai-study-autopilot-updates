@@ -20,6 +20,8 @@ jobs:
     steps:
       - name: Check out trusted release source
         uses: actions/checkout@v4
+      - name: Syntax-check Python files before publishing
+        run: python3 -m compileall -q release_files
       - name: Package and checksum permitted files
         id: package
         shell: bash
