@@ -11,7 +11,7 @@ wanted=['daily_call_cap','count_approved','existing_approved','goal_progress',
 for n in wanted:
     assert n in functions,n
 scope={'CAMPAIGN_START':'2026-10-19','CUTOFF':'2026-10-28',
-       'GOAL_TOTAL':200,'CAMPAIGN_DAILY_CAP':100,
+       'GOAL_TOTAL':200,'CAMPAIGN_DAILY_CAP':300,
        'CALL_CAP':25,'ONE_TIME_EXTRA_DATE':'2026-10-18','ONE_TIME_EXTRA_LIMIT':50}
 day=['2026-10-19']
 scope['a']=SimpleNamespace(today=lambda:day[0])
@@ -21,8 +21,8 @@ exec(compile(module,'<campaign tests>','exec'),scope)
 cap=scope['daily_call_cap']
 assert cap('2026-10-17')==25
 assert cap('2026-10-18')==50
-assert cap('2026-10-19')==100
-assert cap('2026-10-28')==100
+assert cap('2026-10-19')==300
+assert cap('2026-10-28')==300
 assert cap('2026-10-29')==25
 
 s={'last_attempt':'2026-10-19',
@@ -31,10 +31,11 @@ s={'last_attempt':'2026-10-19',
    'history':[{'date':'2026-10-19','calls':23,'errors':['HTTP 400']}]}
 assert scope['goal_progress'](s)==2, 'Never count unresolved or unreviewed'
 assert scope['used_today'](s)==23
+assert "state['history']=state['history'][-1200:]" in source, 'Daily cap must retain enough call history'
 assert scope['campaign_due'](s),'A prior run may continue within daily budget'
-s['history'].append({'date':'2026-10-19','calls':75,'errors':[]})
+s['history'].append({'date':'2026-10-19','calls':275,'errors':[]})
 assert not scope['campaign_due'](s),'Only 2 requests remain'
-s['history'][-1]['calls']=50
+s['history'][-1]['calls']=250
 s['campaign_paused_date']='2026-10-19'
 assert not scope['campaign_due'](s),'A stall blocks repeated spending'
 s.pop('campaign_paused_date')
@@ -55,4 +56,4 @@ assert "'campaign_paused_date'" in source
 assert 'campaign_due(_read_obj(ROOT/' in source
 assert "batch-new-only' if (post_fix or campaign)" in source
 assert 'GOAL_TOTAL-goal_progress(state)' in source
-print('PASS: Gemini-only approved goal, date-scoped 100/day, reuse remaining budget, stop at 200, no-progress pause')
+print('PASS: Gemini-only approved goal, date-scoped 300/day, reuse remaining budget, stop at 200, no-progress pause')
