@@ -226,13 +226,38 @@ def _saa_domain_slots():
 
 SAA_DOMAIN_SLOTS=_saa_domain_slots()
 
-def specs_for(state,n):
+def _topic_usage(state, existing):
+    """Count covered topic *labels* only. Conservative heuristic, not semantic clustering."""
+    usage={}
+    pool=list(existing)
+    for part in ('existing','generated','pending'):
+        for item in (state.get(part) or {}).values():
+            q=item.get('candidate',item) if isinstance(item,dict) else None
+            if isinstance(q,dict):pool.append(q)
+    seen=set()
+    for q in pool:
+        if not isinstance(q,dict):continue
+        uid=q.get('id')
+        if uid and uid in seen:continue
+        if uid:seen.add(uid)
+        topic=str(q.get('topic') or '').strip()
+        domain=str(q.get('domain') or '')
+        if topic:usage[(domain,topic)]=usage.get((domain,topic),0)+1
+    return usage
+
+
+def specs_for(state,n,existing=()):
+    """Weighted domain allocation, select the least-covered topic within each domain."""
+    usage=_topic_usage(state,existing)
     specs=[]
     for ix in range(state['generated_index'],state['generated_index']+n):
         domain=SAA_DOMAIN_SLOTS[ix%100]
-        per_cycle=SAA_DOMAIN_SLOTS[:ix%100+1].count(domain)-1
-        topic_list=SAA_BLUEPRINT[domain]
-        topic=topic_list[((ix//100)*SAA_WEIGHTS[domain]+per_cycle)%len(topic_list)]
+        topics=SAA_BLUEPRINT[domain]
+        # Stable tie breaker rotates topics to avoid always using the first.
+        offset=(ix//100+ix%100)%len(topics)
+        topic=min((topics[(offset+j)%len(topics)] for j in range(len(topics))),
+                  key=lambda t:usage.get((domain,t),0))
+        usage[(domain,topic)]=usage.get((domain,topic),0)+1
         specs.append({'id':f'SAA-AUTO-{ix+1:05d}','domain':domain,'topic':topic,
                       'type':'multiple' if ix%4==3 else 'single',
                       'difficulty':'上級' if ix%3==2 else '中級'})
