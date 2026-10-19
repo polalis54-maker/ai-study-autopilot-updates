@@ -45,7 +45,7 @@ def daily_call_cap(day=None):
     return CALL_CAP
 
 
-G_PROMPT='''AWS SAA-C03のオリジナル日本語模擬試験を生成。specsのdomainとtopicを必ず守り、topic固有の設計判断を主題にする。同一テーマでも要件・正答理由・誤答理由の言い換えだけにしない。マイナーサービスは要件との適合性がある場合のみ採用し、サービス名の暗記問題にはしない。specsと同じ件数を返す。中〜上級の実務シナリオ。可用性・コスト・運用負荷・DRなどの制約を2つ以上含め、誤答ももっともらしく。全選択肢の正誤理由を解説。公式問題を転載しない。JSONのみ: {"questions":[{"id":"指定ID","exam":"SAA-C03","domain":"D1","topic":"...","type":"single","question":"...","choices":{"A":"...","B":"...","C":"...","D":"..."},"correct":["A"],"explanation":"...","difficulty":"中級","language":"ja","review_status":"ai_review_pending","source":{"kind":"original","label":"AI Study Auto-generated / AI review pending"}}]} singleは4択1正解、multipleは5択2正解で問題文に「2つ選択」を明記。すべてのIDと属性を守り、省略しない。'''
+G_PROMPT='''JSONオブジェクトのみを出力。指定した各specのid, exam=SAA-C03, domain, topic, type, difficultyを文字単位で厳守。複数選択なら選択肢5個・正解2個・問題文に「2つ選択」を明記。AWS SAA-C03のオリジナル日本語模擬試験を生成。specsのdomainとtopicを必ず守り、topic固有の設計判断を主題にする。同一テーマでも要件・正答理由・誤答理由の言い換えだけにしない。マイナーサービスは要件との適合性がある場合のみ採用し、サービス名の暗記問題にはしない。specsと同じ件数を返す。中〜上級の実務シナリオ。可用性・コスト・運用負荷・DRなどの制約を2つ以上含め、誤答ももっともらしく。全選択肢の正誤理由を解説。公式問題を転載しない。JSONのみ: {"questions":[{"id":"指定ID","exam":"SAA-C03","domain":"D1","topic":"...","type":"single","question":"...","choices":{"A":"...","B":"...","C":"...","D":"..."},"correct":["A"],"explanation":"...","difficulty":"中級","language":"ja","review_status":"ai_review_pending","source":{"kind":"original","label":"AI Study Auto-generated / AI review pending"}}]} singleは4択1正解、multipleは5択2正解で問題文に「2つ選択」を明記。すべてのIDと属性を守り、省略しない。'''
 R_PROMPT=a.REVIEW_PROMPT.split('JSONオブジェクトだけ返答:')[0]+'''\n各questionsを独立かつ厳格にレビュー。全問題IDについて回答し、資料を調べたと偽らない。JSONのみ: {"reviews":[{"id":"指定ID","verdict":"PASS|REVISE|BLOCK","issues":[],"notes":"...","needs_official_verification":true,"exam_quality":{"distractor_quality":3,"scenario_realism":3,"explanation_depth":3,"difficulty_alignment":3,"reason":"..."}}]}'''
 
 FIELDS={
@@ -112,33 +112,44 @@ def structured_batch_call(client, prompt, payload):
 
 
 def salvage_batch(api,specs,prompt):
-    """Return individual valid questions even when other questions are invalid."""
-    by_id={s['id']:s for s in specs}
+    """Only accept exact spec-matching questions. Never silently coerce a changed ID/type."""
+    by_id={item['id']:item for item in specs}
     response=api.call('openai',prompt,{'specs':specs})
     questions=response.get('questions',[])
     if not isinstance(questions,list):raise ValueError('questions must be array')
     found={}
+    errors=[]
     for q in questions:
-        if not isinstance(q,dict) or q.get('id') not in by_id or q['id'] in found:
-            continue
+        if not isinstance(q,dict):
+            errors.append('question is not a JSON object');continue
+        qid=q.get('id')
+        if qid not in by_id:
+            errors.append('unexpected id: '+str(qid)[:60]);continue
+        if qid in found:
+            errors.append('duplicate response id: '+str(qid));continue
+        spec=by_id[qid]
+        mismatch=[field for field,want in (('exam','SAA-C03'),('type',spec['type']),
+                  ('domain',spec['domain']),('difficulty',spec['difficulty']))
+                  if q.get(field)!=want]
+        if mismatch:
+            errors.append(str(qid)+' mismatched fields: '+','.join(mismatch));continue
+        if q.get('topic')!=spec['topic']:
+            errors.append(str(qid)+' mismatched fields: topic');continue
         try:
             a.validate(q,strict=True)
-            spec=by_id[q['id']]
-            if (q['exam']!='SAA-C03' or q['type']!=spec['type']
-                or q['domain']!=spec['domain']
-                or q['difficulty']!=spec['difficulty']):
-                continue
             if q['type']=='multiple' and not any(t in q['question']
                  for t in ('2つ','２つ','二つ','2 つ')):
-                continue
+                raise ValueError('multiple selection count missing')
             q['source']={'kind':'original',
                          'label':'AI Study Auto-generated / AI review pending'}
             q['review_status']='ai_review_pending'
             q['language']='ja'
-            found[q['id']]=q
-        except (ValueError,KeyError,TypeError):
-            continue
-    return [found[s['id']] for s in specs if s['id'] in found]
+            found[qid]=q
+        except (ValueError,KeyError,TypeError) as exc:
+            errors.append(str(qid)+' invalid schema: '+str(exc)[:90])
+    # Avoid logging the generated question content, which could contain sensitive text.
+    if errors:print('[FAST][FORMAT]', '; '.join(errors[:5]),flush=True)
+    return [found[item['id']] for item in specs if item['id'] in found]
 
 class API(a.Clients):
     def call(self, provider, prompt, payload):
@@ -407,6 +418,10 @@ def run_fast(*,demo=False,force=False,generate_only=False):
         if status is None:status='AI_PASS' if part=='existing' or a.meets_exam_quality(review) else 'NEEDS_QUALITY_UPGRADE'
         if part=='generated' and status=='AI_PASS' and question_is_near_duplicate(q, existing, state):
             status='DUPLICATE_HOLD'  # Never approve a near-duplicate automatically.
+        if part=='generated' and status=='AI_PASS':
+            # A model's self-reported PASS is not documentation verification.
+            # Require an explicit human/content approval for generated material.
+            status='QUALITY_HOLD'
         state[part][q['id']]={'status':status,'candidate':q,'audit':[{'role':'gemini','review':review}],
                               'official_documentation_verified':False,'human_approved':False}
         log.append(q['id']+': '+status)
