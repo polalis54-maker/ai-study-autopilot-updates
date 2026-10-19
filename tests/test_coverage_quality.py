@@ -32,3 +32,8 @@ assert f(q,[old],{}) is True
 other={"id":"diff","question":"EC2 のコストを最適化するために Spot Instances と Savings Plans を選択する設計要件は何ですか。"}
 assert f(q,[other],{}) is False
 print("PASS: SAA domain weights, domain/topic blueprint, near-duplicate gate")
+
+# Verify that the generated-question quarantine is present and precedes persistence.
+assert "status='QUALITY_HOLD'" in source
+assert "mismatched fields:" in source
+assert "if q.get('topic')!=spec['topic']" in source
