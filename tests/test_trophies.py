@@ -100,9 +100,21 @@ print('PASS: 100 achievements, runtime metrics, v1->v2 migration, no loss to que
 assert '<!-- AI_STUDY_GROWTH_V1 -->' in t.TROPHY_UI
 assert 'window.aiGrowthRender=render' in t.TROPHY_UI
 assert 'if(typeof aiGrowthRender' in t.RENDER_PATCHED
-assert 'localStorage.setItem' not in t.TROPHY_UI
+# Only scene selection may be stored. Never overwrite study history.
+growth_js=t.TROPHY_UI.split('<script id="ai-study-growth-script">',1)[1].split('</script>',1)[0]
+assert 'localStorage.setItem' not in js
+assert 'localStorage.setItem(storageKey,selected)' in growth_js
+assert "const storageKey='ai-study-growth-scene-v1'" in growth_js
+assert 'ai-teacher-avatar.webp' in growth_js
+assert 'growthStage' in growth_js and 'growthScenes' in growth_js
+assert 'growthTalk' in growth_js and 'growthPractice' in growth_js
+assert 'fetch(' not in growth_js
 
 # Regression: growth room must be visible on first load, before the practice form.
 assert 'window.aiGrowthRender=render;\nrender();' in t.TROPHY_UI
 assert "document.querySelector('#screen-home .home-main')" in t.TROPHY_UI
 assert "main.querySelector('.home-split')" in t.TROPHY_UI
+
+with tempfile.TemporaryDirectory() as d:
+    growth_path=Path(d)/'growth.js';growth_path.write_text(growth_js,encoding='utf-8')
+    subprocess.run(['node','--check',str(growth_path)],check=True)
