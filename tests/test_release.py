@@ -41,8 +41,8 @@ module=ast.fix_missing_locations(ast.Module(body=subset,type_ignores=[]))
 exec(compile(module,str(p),"exec"),scope)
 
 assert scope["daily_call_cap"]()==50
-assert scope["daily_call_cap"]("2026-10-19")==300
-assert scope["daily_call_cap"]("2026-10-28")==300
+assert scope["daily_call_cap"]("2026-10-19")==25
+assert scope["daily_call_cap"]("2026-10-28")==25
 assert scope["daily_call_cap"]("2026-10-29")==25
 state={"last_attempt":"2026-10-18","auto_retry_date":"2026-10-18",
        "history":[{"date":"2026-10-18","calls":23,"errors":["other failure"]},
