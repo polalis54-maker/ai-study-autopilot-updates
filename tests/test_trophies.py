@@ -101,3 +101,8 @@ assert '<!-- AI_STUDY_GROWTH_V1 -->' in t.TROPHY_UI
 assert 'window.aiGrowthRender=render' in t.TROPHY_UI
 assert 'if(typeof aiGrowthRender' in t.RENDER_PATCHED
 assert 'localStorage.setItem' not in t.TROPHY_UI
+
+# Regression: growth room must be visible on first load, before the practice form.
+assert 'window.aiGrowthRender=render;\nrender();' in t.TROPHY_UI
+assert "document.querySelector('#screen-home .home-main')" in t.TROPHY_UI
+assert "main.querySelector('.home-split')" in t.TROPHY_UI
