@@ -23,9 +23,9 @@ GENERATION_MODEL='gpt-4.1-mini'
 # Count goal as 55 existing questions plus Gemini-approved new candidates.
 # Existing questions are NOT automatically AWS-official-verified.
 GOAL_TOTAL=200
-GEN_DAILY=200
+GEN_DAILY=4
 CAMPAIGN_START='2026-10-19'
-CAMPAIGN_DAILY_CAP=300
+CAMPAIGN_DAILY_CAP=25
 # Optional repairs stay disabled until HTTP 400 is diagnosed.
 # Pause optional OpenAI rewriter until its HTTP 400 path is diagnosed.
 # Never block the already Gemini-reviewed valid questions.
