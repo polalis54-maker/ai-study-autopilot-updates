@@ -3,7 +3,7 @@
 The watched machine must be awake. No deployment to Netlify; no secret uploads.
 """
 from __future__ import annotations
-import datetime, html, json, os, subprocess, sys, time
+import datetime, difflib, html, json, os, re, subprocess, sys, time
 from pathlib import Path
 import urllib.error
 import urllib.request
@@ -257,6 +257,29 @@ def judge(api,qs):
             if attempt:raise
     return {}
 
+def question_is_near_duplicate(candidate, existing, state, threshold=0.88):
+    """Conservative text overlap gate, not a semantic equivalence classifier."""
+    def normalized(q):
+        return re.sub(r'[\\W_]+', '', str(q.get('question', '')).lower())
+    new=normalized(candidate)
+    if len(new)<25:
+        return False
+    others=list(existing)
+    for part in ('existing','generated','pending'):
+        for item in (state.get(part) or {}).values():
+            q=item.get('candidate',item) if isinstance(item,dict) else None
+            if isinstance(q,dict) and q.get('id')!=candidate.get('id'):
+                others.append(q)
+    for old in others:
+        if not isinstance(old,dict) or old.get('id')==candidate.get('id'):
+            continue
+        text=normalized(old)
+        if len(text)<25:continue
+        if new==text or difflib.SequenceMatcher(None,new,text,autojunk=False).ratio()>=threshold:
+            return True
+    return False
+
+
 def count_approved(state):
     generated=state.get('generated') or {}
     return sum(isinstance(v,dict) and v.get('status')=='AI_PASS'
@@ -357,6 +380,8 @@ def run_fast(*,demo=False,force=False,generate_only=False):
     def keep(q,review,part):
         status={'BLOCK':'BLOCKED','REVISE':'REVISE_UNRESOLVED'}.get(review['verdict'])
         if status is None:status='AI_PASS' if part=='existing' or a.meets_exam_quality(review) else 'NEEDS_QUALITY_UPGRADE'
+        if part=='generated' and status=='AI_PASS' and question_is_near_duplicate(q, existing, state):
+            status='DUPLICATE_HOLD'  # Never approve a near-duplicate automatically.
         state[part][q['id']]={'status':status,'candidate':q,'audit':[{'role':'gemini','review':review}],
                               'official_documentation_verified':False,'human_approved':False}
         log.append(q['id']+': '+status)
