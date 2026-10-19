@@ -183,6 +183,8 @@ function trophyRefresh(){
     clearTimeout(toastTimer);toastTimer=setTimeout(()=>{toast.hidden=true},4500);
   }
 }
+window.trophyRender=trophyRender;
+window.trophyRefresh=trophyRefresh;
 previous=new Set(earned(metrics()).map(t=>t[0]));
 trophyRender();
 })();
