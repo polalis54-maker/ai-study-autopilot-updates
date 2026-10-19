@@ -52,6 +52,8 @@ jobs:
         run: python3 tests/test_campaign.py
       - name: Test Netlify mobile PWA publishing safely offline
         run: python3 tests/test_mobile.py
+      - name: Test 30 trophies, lossless PWA patch, and browser JavaScript syntax
+        run: python3 tests/test_trophies.py
       - name: Package and checksum permitted files
         id: package
         shell: bash
@@ -67,7 +69,7 @@ jobs:
                      "check_running.py", "RUN_RETRY_GENERATE.cmd", "OPEN_LIVE_STATUS.cmd",
                      "RUN_BACKGROUND.cmd", "START_AUTOPILOT.cmd", "ENABLE_AUTORUN.cmd",
                      "DISABLE_AUTORUN.cmd", "RUN_DAILY.cmd", "RUN_ONCE.cmd",
-                     "daemon.py", "install_autorun.py", "update_agent.py", "update_watchdog.py"}
+                     "daemon.py", "install_autorun.py", "update_agent.py", "update_watchdog.py", "trophies.py"}
           names = {p.name for p in root.iterdir() if p.is_file()}
           assert names <= allowed and names >= {"VERSION.json"}, "Unknown or missing package file"
           assert len(names) <= len(allowed)
