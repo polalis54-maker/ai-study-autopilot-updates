@@ -8,7 +8,7 @@ from unittest import mock
 spec=importlib.util.spec_from_file_location('lp','release_files/live_progress.py')
 lp=importlib.util.module_from_spec(spec);spec.loader.exec_module(lp)
 # Tested separately by test_trophies.py; this test uses intentionally minimal HTML fixtures.
-lp.trophies.install=lambda study: False
+lp.install_trophy_ui=lambda study: False
 
 assert lp.mobile_site_host('spectacular-medovik-6118c6.netlify.app')=='spectacular-medovik-6118c6.netlify.app'
 assert lp.mobile_site_host('https://spectacular-medovik-6118c6.netlify.app/')=='spectacular-medovik-6118c6.netlify.app'
