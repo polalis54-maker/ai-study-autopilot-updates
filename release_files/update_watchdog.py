@@ -476,7 +476,7 @@ def run_fast(*,demo=False,force=False,generate_only=False):
         while (attempted<GEN_DAILY and api.calls+4<=api.limit
                and goal_progress(state)<GOAL_TOTAL):
             group=specs_for(state,min(GROUP,GEN_DAILY-attempted,
-                                      GOAL_TOTAL-goal_progress(state)))
+                                      GOAL_TOTAL-goal_progress(state)),existing)
             progress('RUNNING','OpenAI一括生成',str([s['id'] for s in group]))
             proposals=make_safe(group)
             state['generated_index']+=len(group);attempted+=len(group)
