@@ -30,7 +30,7 @@ a=FakeA()
 scope={"a":a,"json":json,"urllib":urllib,"CALL_CAP":25,
        "ONE_TIME_EXTRA_DATE":"2026-10-18","ONE_TIME_EXTRA_LIMIT":50,
        "GENERATION_MODEL":"gpt-4.1-mini",
-       "CAMPAIGN_START":"2026-10-19","CAMPAIGN_DAILY_CAP":300,
+       "CAMPAIGN_START":"2026-10-19","CAMPAIGN_DAILY_CAP":25,
        "CUTOFF":"2026-10-28"}
 declarations = [node for node in tree.body if isinstance(node,ast.Assign)
                 and any(isinstance(t,ast.Name) and t.id in ("FIELDS","SCHEMA")
