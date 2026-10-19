@@ -629,7 +629,7 @@ def install_trophy_ui(study:Path)->bool:
     if original.count('</body>')!=1:
         raise ValueError('AI Study document structure unexpected')
     if MARKER in original:
-        old=re.compile(re.escape(MARKER)+r'\s*<style id="ai-study-trophy-style">.*?</style>\s*<script id="ai-study-trophy-script">.*?</script>',re.S)
+        old=re.compile(re.escape(MARKER)+r'\s*<style id="ai-study-trophy-style">.*?</style>\s*<script id="ai-study-trophy-script">.*?</script>\s*(?=</body>)',re.S)
         if len(old.findall(original))!=1 or original.count(MARKER)!=1:
             raise ValueError('Unknown trophy HTML markup; patch refused safely')
         updated=old.sub(lambda _:MARKER+'\n'+TROPHY_UI,original,count=1)
