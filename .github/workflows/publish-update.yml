@@ -69,8 +69,12 @@ jobs:
                      "check_running.py", "RUN_RETRY_GENERATE.cmd", "OPEN_LIVE_STATUS.cmd",
                      "RUN_BACKGROUND.cmd", "START_AUTOPILOT.cmd", "ENABLE_AUTORUN.cmd",
                      "DISABLE_AUTORUN.cmd", "RUN_DAILY.cmd", "RUN_ONCE.cmd",
-                     "daemon.py", "install_autorun.py", "update_agent.py", "update_watchdog.py", "trophies.py"}
+                     "daemon.py", "install_autorun.py", "update_agent.py", "update_watchdog.py"}
           names = {p.name for p in root.iterdir() if p.is_file()}
+          # The v0.4.2 Windows update agent has a fixed allowlist.
+          # New entries would make even a verified ZIP fail on old installations.
+          assert "trophies.py" not in names, "Old Windows clients reject new module names"
+          assert "live_progress.py" in names, "Achievement code must stay in a preapproved module"
           assert names <= allowed and names >= {"VERSION.json"}, "Unknown or missing package file"
           assert len(names) <= len(allowed)
           data = {name: (root / name).read_bytes() for name in sorted(names)}
