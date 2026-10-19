@@ -352,6 +352,9 @@ TROPHY_UI=r"""
 .trophy-item strong{display:block;color:#ffe6ad;font-size:13px}
 .trophy-item small{color:#b8c6e0;display:block;margin-top:5px;font-size:12px;line-height:1.5}
 .trophy-item .tier{color:#ffc7eb;font-size:10px;font-weight:700}
+.trophy-item[data-tier="ゴールド"]{border-color:#d5a958}
+.trophy-item[data-tier="レジェンド"]{border-color:#ce88f3;background:#342954}
+#trophyTierSelect{background:#253553;color:#ecedff;border:1px solid #6679a0;border-radius:8px;padding:7px;margin:8px 0 12px}
 .trophy-item .trophy-condition{color:#b0d7ec;font-size:11px;margin-top:4px}
 .trophy-toast{position:fixed;bottom:18px;left:50%;transform:translateX(-50%);z-index:155;width:min(420px,calc(100% - 30px));background:linear-gradient(110deg,#493359,#24375f);border:2px solid #ffc47b;border-radius:16px;padding:14px 17px;color:#fff;box-shadow:0 14px 35px #000b;text-align:center;font-weight:bold}
 .trophy-toast[hidden]{display:none!important}
@@ -393,7 +396,81 @@ const achievements=[
  ['perfect3','🎊','満点コレクター','演習・模試で3回満点','特別',3,'perfect','3回も満点、お見事！'],
  ['sure1','🔍','思い込みを発見','確信して間違えた問題を1問発見','発見',1,'sureMistakes','気づくことが成長の入り口！']
 ];
+const trophyExtras=[
+  ["bonus_responses_75","🪜","七十五の階段","回答数75問","回答数",75,"responses","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_responses_150","🛤️","150問の旅路","回答数150問","回答数",150,"responses","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_responses_250","⚔️","進撃の250問","回答数250問","回答数",250,"responses","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_responses_500","🧱","五百問の壁","回答数500問","回答数",500,"responses","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_responses_1000","🚢","千問の航海","回答数1000問","回答数",1000,"responses","勉強した分だけ、自分の力になるよ！","レジェンド"],
+  ["bonus_correct_75","🌼","正解の積み重ね","累計正解75問","正解数",75,"correct","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_correct_125","👣","確かな一歩","累計正解125問","正解数",125,"correct","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_correct_150","🕯️","理解の灯火","累計正解150問","正解数",150,"correct","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_correct_250","🔨","知識の鍛冶屋","累計正解250問","正解数",250,"correct","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_correct_500","🌌","正解の星座","累計正解500問","正解数",500,"correct","勉強した分だけ、自分の力になるよ！","レジェンド"],
+  ["bonus_unique_20","🪻","新顔歓迎","異なる問題を20問","初見挑戦",20,"unique","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_unique_75","🧪","75問の発見","異なる問題を75問","初見挑戦",75,"unique","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_unique_100","🗾","百問百景","異なる問題を100問","初見挑戦",100,"unique","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_unique_125","🔭","見聞を広げる","異なる問題を125問","初見挑戦",125,"unique","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_unique_150","🌐","世界が広がる","異なる問題を150問","初見挑戦",150,"unique","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_unique_175","🏛️","知の回廊","異なる問題を175問","初見挑戦",175,"unique","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_unique_200","📖","問題図鑑","異なる問題を200問","初見挑戦",200,"unique","勉強した分だけ、自分の力になるよ！","レジェンド"],
+  ["bonus_bestStreak_4","✨","四連のひらめき","連続正解4問","連続正解",4,"bestStreak","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_bestStreak_7","💫","七連の集中","連続正解7問","連続正解",7,"bestStreak","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_bestStreak_12","⚡","十二の閃光","連続正解12問","連続正解",12,"bestStreak","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_bestStreak_15","🌊","好調の波","連続正解15問","連続正解",15,"bestStreak","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_bestStreak_20","🛡️","鉄壁の二十連","連続正解20問","連続正解",20,"bestStreak","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_bestStreak_30","🐉","連勝の伝説","連続正解30問","連続正解",30,"bestStreak","勉強した分だけ、自分の力になるよ！","レジェンド"],
+  ["bonus_bestDays_4","☀️","四日目の約束","連続学習4","継続",4,"bestDays","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_bestDays_5","🖐️","五日連続の証","連続学習5","継続",5,"bestDays","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_bestDays_10","🌱","十日の日課","連続学習10","継続",10,"bestDays","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_bestDays_21","🎋","三週間の軌跡","連続学習21","継続",21,"bestDays","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_bestDays_30","🗓️","一か月の積み重ね","連続学習30","継続",30,"bestDays","勉強した分だけ、自分の力になるよ！","レジェンド"],
+  ["bonus_recoveries_2","🔁","もう一度の勝利","間違えた問題を後で正解2回","復習",2,"recoveries","苦手を一つずつ理解に変えた成果！","ブロンズ"],
+  ["bonus_recoveries_3","📐","失敗は先生","間違えた問題を後で正解3回","復習",3,"recoveries","苦手を一つずつ理解に変えた成果！","ブロンズ"],
+  ["bonus_recoveries_10","🧹","リベンジ10","間違えた問題を後で正解10回","復習",10,"recoveries","苦手を一つずつ理解に変えた成果！","シルバー"],
+  ["bonus_recoveries_15","🪓","苦手攻略隊","間違えた問題を後で正解15回","復習",15,"recoveries","苦手を一つずつ理解に変えた成果！","ゴールド"],
+  ["bonus_recoveries_25","⚗️","弱点の錬金術師","間違えた問題を後で正解25回","復習",25,"recoveries","苦手を一つずつ理解に変えた成果！","レジェンド"],
+  ["bonus_uncertainWins_5","🌾","仮説の芽","迷い・推測で正解5問","挑戦",5,"uncertainWins","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_uncertainWins_15","🕵️","推理を磨く","迷い・推測で正解15問","挑戦",15,"uncertainWins","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_uncertainWins_25","🔮","迷いの向こう","迷い・推測で正解25問","挑戦",25,"uncertainWins","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_uncertainWins_40","🧬","仮説の達人","迷い・推測で正解40問","挑戦",40,"uncertainWins","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_uncertainWins_50","🧠","考え抜いた証","迷い・推測で正解50問","挑戦",50,"uncertainWins","勉強した分だけ、自分の力になるよ！","レジェンド"],
+  ["bonus_perfect_2","🎀","満点ふたつ","満点達成2問","特別",2,"perfect","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_perfect_5","🌟","五つ星の満点","満点達成5問","特別",5,"perfect","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_perfect_10","🏵️","満点の達人","満点達成10問","特別",10,"perfect","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_perfect_20","👑","パーフェクト伝説","満点達成20問","特別",20,"perfect","勉強した分だけ、自分の力になるよ！","レジェンド"],
+  ["bonus_sureCorrect_10","🧠","確信の一歩","確信して正解10問","理解",10,"sureCorrect","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_sureCorrect_25","🔎","根拠を持って","確信して正解25問","理解",25,"sureCorrect","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_sureCorrect_50","🔐","確信の蓄積","確信して正解50問","理解",50,"sureCorrect","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_sureCorrect_100","💠","自信と実力","確信して正解100問","理解",100,"sureCorrect","勉強した分だけ、自分の力になるよ！","レジェンド"],
+  ["bonus_studyDays_5","💐","五日分の努力","累計学習日数5","継続",5,"studyDays","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_studyDays_10","🌅","十日間の前進","累計学習日数10","継続",10,"studyDays","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_studyDays_15","🌙","半月の学び","累計学習日数15","継続",15,"studyDays","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_studyDays_30","🏔️","毎日積み上げる","累計学習日数30","継続",30,"studyDays","勉強した分だけ、自分の力になるよ！","レジェンド"],
+  ["bonus_domainsSeen_2","🗺️","分野をまたぐ","挑戦した分野数2分野","分野",2,"domainsSeen","分野を横断する視点を育てよう！","ブロンズ"],
+  ["bonus_domainsSeen_3","🪐","三つの世界","挑戦した分野数3分野","分野",3,"domainsSeen","分野を横断する視点を育てよう！","ブロンズ"],
+  ["bonus_domainsSeen_4","🧭","四方に広がる","挑戦した分野数4分野","分野",4,"domainsSeen","分野を横断する視点を育てよう！","シルバー"],
+  ["bonus_domainsSeen_5","🌉","知識を横断","挑戦した分野数5分野","分野",5,"domainsSeen","分野を横断する視点を育てよう！","ゴールド"],
+  ["bonus_domainsSeen_6","🛰️","広域アーキテクト","挑戦した分野数6分野","分野",6,"domainsSeen","分野を横断する視点を育てよう！","レジェンド"],
+  ["bonus_domainsMastered_1","🌿","得意分野の種","正答率70%以上・5問以上の分野数1分野","分野",1,"domainsMastered","分野を横断する視点を育てよう！","ブロンズ"],
+  ["bonus_domainsMastered_2","🪵","強みがふたつ","正答率70%以上・5問以上の分野数2分野","分野",2,"domainsMastered","分野を横断する視点を育てよう！","シルバー"],
+  ["bonus_domainsMastered_3","🏗️","三分野の柱","正答率70%以上・5問以上の分野数3分野","分野",3,"domainsMastered","分野を横断する視点を育てよう！","ゴールド"],
+  ["bonus_domainsMastered_4","💎","多方面で安定","正答率70%以上・5問以上の分野数4分野","分野",4,"domainsMastered","分野を横断する視点を育てよう！","レジェンド"],
+  ["bonus_perfectMax_5","🏅","五問の完全勝利","一度の満点演習の問題数5問","満点",5,"perfectMax","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_perfectMax_10","🏆","十問パーフェクト","一度の満点演習の問題数10問","満点",10,"perfectMax","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_perfectMax_20","🥇","二十問の栄光","一度の満点演習の問題数20問","満点",20,"perfectMax","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_bestRate20_70","📈","20問で7割","累計20問以上時点の最高正答率70％","正答率",70,"bestRate20","積み重ねた正答率が力になったね！","ブロンズ"],
+  ["bonus_bestRate50_75","💡","50問で75％","累計50問以上時点の最高正答率75％","正答率",75,"bestRate50","積み重ねた正答率が力になったね！","ブロンズ"],
+  ["bonus_bestRate100_80","📊","100問で8割","累計100問以上時点の最高正答率80％","正答率",80,"bestRate100","積み重ねた正答率が力になったね！","ブロンズ"],
+  ["bonus_bestRate150_85","🎖️","150問で85％","累計150問以上時点の最高正答率85％","正答率",85,"bestRate150","積み重ねた正答率が力になったね！","ブロンズ"],
+  ["bonus_maxDaily_10","🍀","今日は10問","1日の回答数10","一日挑戦",10,"maxDaily","勉強した分だけ、自分の力になるよ！","ブロンズ"],
+  ["bonus_maxDaily_20","🌺","学びの20問","1日の回答数20","一日挑戦",20,"maxDaily","勉強した分だけ、自分の力になるよ！","シルバー"],
+  ["bonus_maxDaily_30","🏃","一日30問","1日の回答数30","一日挑戦",30,"maxDaily","勉強した分だけ、自分の力になるよ！","ゴールド"],
+  ["bonus_maxDaily_50","🥋","特訓の50問","1日の回答数50","一日挑戦",50,"maxDaily","勉強した分だけ、自分の力になるよ！","レジェンド"]
+];
+achievements.push(...trophyExtras);
 let filter='all';
+let tierFilter='all';
 let previous=null;
 let toastTimer=null;
 const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -402,18 +479,37 @@ function metrics(){
   const records=(Array.isArray(attempts)?attempts:[]).filter(x=>x&&typeof x==='object')
       .slice().sort((a,b)=>Date.parse(a.ts||0)-Date.parse(b.ts||0));
   let correct=0,bestStreak=0,streak=0,sureMistakes=0,uncertainWins=0,recoveries=0;
-  const wrongIds=new Set();
-  const days=new Set();
+  let sureCorrect=0,domainsMastered=0,bestRate20=0,bestRate50=0,bestRate100=0,bestRate150=0;
+  const wrongIds=new Set(),days=new Set(),dayCounts=new Map(),domainStats=new Map();
   for(const r of records){
-    if(r.correct){correct++;streak++;bestStreak=Math.max(bestStreak,streak);
+    if(r.correct){
+      correct++;streak++;bestStreak=Math.max(bestStreak,streak);
       if(wrongIds.has(r.id)){recoveries++;wrongIds.delete(r.id)}
       if(r.confidence==='迷い'||r.confidence==='推測')uncertainWins++;
+      if(r.confidence==='確信')sureCorrect++;
     }else{
       streak=0;if(r.id)wrongIds.add(r.id);
       if(r.confidence==='確信')sureMistakes++;
     }
-    const d=new Date(r.ts);if(!Number.isNaN(d.getTime()))
-      days.add(d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'));
+    if(r.domain){
+      const d=domainStats.get(r.domain)||{n:0,c:0};d.n++;if(r.correct)d.c++;
+      domainStats.set(r.domain,d);
+      domainsMastered=Math.max(domainsMastered,[...domainStats.values()].filter(v=>v.n>=5&&v.c/v.n>=.7).length);
+    }
+    const date=new Date(r.ts);
+    if(!Number.isNaN(date.getTime())){
+      const key=date.getFullYear()+'-'+String(date.getMonth()+1).padStart(2,'0')+'-'+String(date.getDate()).padStart(2,'0');
+      days.add(key);dayCounts.set(key,(dayCounts.get(key)||0)+1);
+    }
+  }
+  let runningCorrect=0;
+  for(let i=0;i<records.length;i++){
+    if(records[i].correct)runningCorrect++;
+    const rate=100*runningCorrect/(i+1);
+    if(i+1>=20)bestRate20=Math.max(bestRate20,rate);
+    if(i+1>=50)bestRate50=Math.max(bestRate50,rate);
+    if(i+1>=100)bestRate100=Math.max(bestRate100,rate);
+    if(i+1>=150)bestRate150=Math.max(bestRate150,rate);
   }
   let bestDays=0,daysStreak=0,prev=null;
   for(const key of [...days].sort()){
@@ -421,9 +517,13 @@ function metrics(){
     daysStreak=prev!==null&&Math.round((day-prev)/86400000)===1?daysStreak+1:1;
     bestDays=Math.max(bestDays,daysStreak);prev=day;
   }
-  return {responses:records.length,correct,bestStreak,bestDays,
-    unique:new Set(records.map(x=>x.id).filter(Boolean)).size,
-    recoveries,uncertainWins,perfect:Array.isArray(perfectAwards)?perfectAwards.length:0,sureMistakes};
+  return {responses:records.length,correct,bestStreak,bestDays,studyDays:days.size,
+    maxDaily:Math.max(0,...dayCounts.values()),
+    unique:new Set(records.map(x=>x.id).filter(Boolean)).size,domainsSeen:domainStats.size,domainsMastered,
+    recoveries,uncertainWins,sureCorrect,bestRate20,bestRate50,bestRate100,bestRate150,
+    perfect:Array.isArray(perfectAwards)?perfectAwards.length:0,
+    perfectMax:Math.max(0,...(Array.isArray(perfectAwards)?perfectAwards:[]).map(a=>Number(a.count)||0)),
+    sureMistakes};
 }
 function earned(stats){return achievements.filter(t=>(stats[t[6]]||0)>=t[5])}
 function paintTrophyHome(){
@@ -443,17 +543,29 @@ function paintTrophyHome(){
     '<button class="btn secondary" type="button" id="showTrophies">トロフィー一覧を見る →</button>';
   $t('showTrophies').addEventListener('click',openTrophies);
 }
+function trophyTier(t){
+  if(t[8])return t[8];
+  const x=t[5],metric=t[6];
+  if(metric==='bestDays')return x>=14?'レジェンド':x>=7?'ゴールド':x>=3?'シルバー':'ブロンズ';
+  if(metric==='bestStreak')return x>=10?'レジェンド':x>=5?'ゴールド':x>=3?'シルバー':'ブロンズ';
+  if(metric==='perfect')return x>=3?'ゴールド':x>=1?'シルバー':'ブロンズ';
+  if(x>=200)return 'レジェンド';
+  if(x>=50)return 'ゴールド';
+  if(x>=10)return 'シルバー';
+  return 'ブロンズ';
+}
 function drawGrid(){
   const grid=$t('trophyGrid');if(!grid)return;
   const stats=metrics(),ids=new Set(earned(stats).map(t=>t[0]));
-  const visible=achievements.filter(t=>filter==='all'||(filter==='unlocked'?ids.has(t[0]):!ids.has(t[0])));
+  const visible=achievements.filter(t=>(filter==='all'||(filter==='unlocked'?ids.has(t[0]):!ids.has(t[0])))
+    &&(tierFilter==='all'||trophyTier(t)===tierFilter));
   grid.innerHTML=visible.length?visible.map(t=>{
-    const open=ids.has(t[0]);
-    return '<article class="trophy-item '+(open?'':'locked')+'"><span class="glyph" aria-hidden="true">'+(open?t[1]:'🔒')+'</span>'+
-      '<span class="tier">'+safe(t[4])+' · '+(open?'獲得済み':'未獲得')+'</span>'+
+    const open=ids.has(t[0]),tier=trophyTier(t);
+    return '<article class="trophy-item '+(open?'':'locked')+'" data-tier="'+safe(tier)+'"><span class="glyph" aria-hidden="true">'+(open?t[1]:'🔒')+'</span>'+
+      '<span class="tier">'+safe(tier)+' · '+safe(t[4])+' · '+(open?'獲得済み':'未獲得')+'</span>'+
       '<strong>'+safe(t[2])+'</strong><small>'+safe(t[7])+'</small>'+
       '<div class="trophy-condition">'+safe(t[3])+' · '+Math.min(stats[t[6]]||0,t[5])+'/'+t[5]+'</div></article>';
-  }).join(''):'<p class="muted">ここにはまだトロフィーがないよ。</p>';
+  }).join(''):'<p class="muted">この条件のトロフィーはないよ。</p>';
   const count=$t('trophyModalCount');if(count)count.textContent=ids.size+' / '+achievements.length+' 獲得';
   document.querySelectorAll('[data-trophy-filter]').forEach(btn=>btn.setAttribute('aria-pressed',String(btn.dataset.trophyFilter===filter)));
 }
@@ -466,12 +578,14 @@ function ensureModal(){
     '<div class="trophy-filters"><button data-trophy-filter="all" aria-pressed="true">すべて</button>'+
     '<button data-trophy-filter="unlocked" aria-pressed="false">獲得済み</button>'+
     '<button data-trophy-filter="locked" aria-pressed="false">未獲得</button></div>'+
+    '<label class="tiny" for="trophyTierSelect">ランク： <select id="trophyTierSelect" aria-label="トロフィーランク"><option value="all">全ランク</option><option>ブロンズ</option><option>シルバー</option><option>ゴールド</option><option>レジェンド</option></select></label>'+
     '<div class="trophy-grid" id="trophyGrid"></div>'+
     '<p class="tiny">※記録はこの端末の学習履歴をもとに計算。トロフィーは認定試験の合否を保証するものではありません。</p></section>';
   document.body.append(shade);
   shade.addEventListener('click',e=>{if(e.target===shade)closeTrophies()});
   $t('closeTrophies').addEventListener('click',closeTrophies);
   shade.querySelectorAll('[data-trophy-filter]').forEach(b=>b.addEventListener('click',()=>{filter=b.dataset.trophyFilter;drawGrid()}));
+  $t('trophyTierSelect').addEventListener('change',e=>{tierFilter=e.target.value;drawGrid()});
   document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!shade.hidden)closeTrophies()});
   const toast=document.createElement('div');toast.id='trophyToast';toast.className='trophy-toast';toast.hidden=true;toast.setAttribute('role','status');toast.setAttribute('aria-live','polite');
   document.body.append(toast);
@@ -506,20 +620,26 @@ trophyRender();
 """
 
 def install_trophy_ui(study:Path)->bool:
-    """Inject trophy UI into the current local PWA without changing questions."""
+    """Install/upgrade trophy UI while preserving study questions and local answers."""
     study=Path(study)
     path=study/'index.html'
     sw=study/'sw.js'
     original=path.read_text(encoding='utf-8')
-    if MARKER in original:
-        return False
-    if original.count(SAVE_ORIGINAL)!=1 or original.count(RENDER_ORIGINAL)!=1:
-        raise ValueError('Unknown AI Study version; trophy patch refused safely')
     if original.count('</body>')!=1:
         raise ValueError('AI Study document structure unexpected')
-    updated=original.replace(SAVE_ORIGINAL,SAVE_PATCHED)
-    updated=updated.replace(RENDER_ORIGINAL,RENDER_PATCHED)
-    updated=updated.replace('</body>',MARKER+'\n'+TROPHY_UI+'</body>')
+    if MARKER in original:
+        old=re.compile(re.escape(MARKER)+r'\s*<style id="ai-study-trophy-style">.*?</style>\s*<script id="ai-study-trophy-script">.*?</script>',re.S)
+        if len(old.findall(original))!=1 or original.count(MARKER)!=1:
+            raise ValueError('Unknown trophy HTML markup; patch refused safely')
+        updated=old.sub(lambda _:MARKER+'\n'+TROPHY_UI,original,count=1)
+    else:
+        if original.count(SAVE_ORIGINAL)!=1 or original.count(RENDER_ORIGINAL)!=1:
+            raise ValueError('Unknown AI Study version; trophy patch refused safely')
+        updated=original.replace(SAVE_ORIGINAL,SAVE_PATCHED)
+        updated=updated.replace(RENDER_ORIGINAL,RENDER_PATCHED)
+        updated=updated.replace('</body>',MARKER+'\n'+TROPHY_UI+'</body>')
+    if updated==original:
+        return False
     if not sw.is_file():raise ValueError('Missing PWA service worker')
     sw_text=sw.read_text(encoding='utf-8')
     old_cache=re.search(r"const CACHE='ai-study-[^']+';",sw_text)
@@ -535,7 +655,6 @@ def install_trophy_ui(study:Path)->bool:
         restore.write_text(original,encoding='utf-8');restore.replace(path)
         raise
     return True
-
 
 if __name__=='__main__':
     cmd=sys.argv[1:] if len(sys.argv)>1 else []
