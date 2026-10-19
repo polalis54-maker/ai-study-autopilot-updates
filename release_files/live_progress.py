@@ -1,6 +1,7 @@
 """Progress and fail-closed LOCAL AI Study sync. No network or model API calls."""
 import datetime, hashlib, html, io, json, re, zipfile
 from pathlib import Path
+import trophies
 
 
 def save_json(path, data):
@@ -244,6 +245,7 @@ def publish_mobile(out=None,quiet=False,force=False):
     site_id=cfg['site_id']
     if not isinstance(site_id,str) or not site_id or '/' in site_id:
         raise ValueError('Invalid configured Netlify site ID')
+    trophies.install(study)  # idempotent; questions and history untouched
     bundle,total=build_mobile_zip(study)
     digest=hashlib.sha256(bundle).hexdigest()
     logpath=configdir/'last_deploy.json'
