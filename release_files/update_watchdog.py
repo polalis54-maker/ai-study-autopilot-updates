@@ -3,7 +3,7 @@
 The watched machine must be awake. No deployment to Netlify; no secret uploads.
 """
 from __future__ import annotations
-import datetime, html, json, os, subprocess, sys, time
+import datetime, difflib, html, json, os, re, subprocess, sys, time
 from pathlib import Path
 import urllib.error
 import urllib.request
@@ -23,9 +23,9 @@ GENERATION_MODEL='gpt-4.1-mini'
 # Count goal as 55 existing questions plus Gemini-approved new candidates.
 # Existing questions are NOT automatically AWS-official-verified.
 GOAL_TOTAL=200
-GEN_DAILY=200
+GEN_DAILY=4
 CAMPAIGN_START='2026-10-19'
-CAMPAIGN_DAILY_CAP=300
+CAMPAIGN_DAILY_CAP=25
 # Optional repairs stay disabled until HTTP 400 is diagnosed.
 # Pause optional OpenAI rewriter until its HTTP 400 path is diagnosed.
 # Never block the already Gemini-reviewed valid questions.
@@ -45,7 +45,7 @@ def daily_call_cap(day=None):
     return CALL_CAP
 
 
-G_PROMPT='''AWS SAA-C03のオリジナル日本語模擬試験を生成。specsと同じ件数を返す。中〜上級の実務シナリオ。可用性・コスト・運用負荷・DRなどの制約を2つ以上含め、誤答ももっともらしく。全選択肢の正誤理由を解説。公式問題を転載しない。JSONのみ: {"questions":[{"id":"指定ID","exam":"SAA-C03","domain":"D1","topic":"...","type":"single","question":"...","choices":{"A":"...","B":"...","C":"...","D":"..."},"correct":["A"],"explanation":"...","difficulty":"中級","language":"ja","review_status":"ai_review_pending","source":{"kind":"original","label":"AI Study Auto-generated / AI review pending"}}]} singleは4択1正解、multipleは5択2正解で問題文に「2つ選択」を明記。すべてのIDと属性を守り、省略しない。'''
+G_PROMPT='''JSONオブジェクトのみを出力。指定した各specのid, exam=SAA-C03, domain, topic, type, difficultyを文字単位で厳守。複数選択なら選択肢5個・正解2個・問題文に「2つ選択」を明記。AWS SAA-C03のオリジナル日本語模擬試験を生成。specsのdomainとtopicを必ず守り、topic固有の設計判断を主題にする。同一テーマでも要件・正答理由・誤答理由の言い換えだけにしない。マイナーサービスは要件との適合性がある場合のみ採用し、サービス名の暗記問題にはしない。specsと同じ件数を返す。中〜上級の実務シナリオ。可用性・コスト・運用負荷・DRなどの制約を2つ以上含め、誤答ももっともらしく。全選択肢の正誤理由を解説。公式問題を転載しない。JSONのみ: {"questions":[{"id":"指定ID","exam":"SAA-C03","domain":"D1","topic":"...","type":"single","question":"...","choices":{"A":"...","B":"...","C":"...","D":"..."},"correct":["A"],"explanation":"...","difficulty":"中級","language":"ja","review_status":"ai_review_pending","source":{"kind":"original","label":"AI Study Auto-generated / AI review pending"}}]} singleは4択1正解、multipleは5択2正解で問題文に「2つ選択」を明記。すべてのIDと属性を守り、省略しない。'''
 R_PROMPT=a.REVIEW_PROMPT.split('JSONオブジェクトだけ返答:')[0]+'''\n各questionsを独立かつ厳格にレビュー。全問題IDについて回答し、資料を調べたと偽らない。JSONのみ: {"reviews":[{"id":"指定ID","verdict":"PASS|REVISE|BLOCK","issues":[],"notes":"...","needs_official_verification":true,"exam_quality":{"distractor_quality":3,"scenario_realism":3,"explanation_depth":3,"difficulty_alignment":3,"reason":"..."}}]}'''
 
 FIELDS={
@@ -112,33 +112,44 @@ def structured_batch_call(client, prompt, payload):
 
 
 def salvage_batch(api,specs,prompt):
-    """Return individual valid questions even when other questions are invalid."""
-    by_id={s['id']:s for s in specs}
+    """Only accept exact spec-matching questions. Never silently coerce a changed ID/type."""
+    by_id={item['id']:item for item in specs}
     response=api.call('openai',prompt,{'specs':specs})
     questions=response.get('questions',[])
     if not isinstance(questions,list):raise ValueError('questions must be array')
     found={}
+    errors=[]
     for q in questions:
-        if not isinstance(q,dict) or q.get('id') not in by_id or q['id'] in found:
-            continue
+        if not isinstance(q,dict):
+            errors.append('question is not a JSON object');continue
+        qid=q.get('id')
+        if qid not in by_id:
+            errors.append('unexpected id: '+str(qid)[:60]);continue
+        if qid in found:
+            errors.append('duplicate response id: '+str(qid));continue
+        spec=by_id[qid]
+        mismatch=[field for field,want in (('exam','SAA-C03'),('type',spec['type']),
+                  ('domain',spec['domain']),('difficulty',spec['difficulty']))
+                  if q.get(field)!=want]
+        if mismatch:
+            errors.append(str(qid)+' mismatched fields: '+','.join(mismatch));continue
+        if 'topic' in spec and q.get('topic')!=spec['topic']:
+            errors.append(str(qid)+' mismatched fields: topic');continue
         try:
             a.validate(q,strict=True)
-            spec=by_id[q['id']]
-            if (q['exam']!='SAA-C03' or q['type']!=spec['type']
-                or q['domain']!=spec['domain']
-                or q['difficulty']!=spec['difficulty']):
-                continue
             if q['type']=='multiple' and not any(t in q['question']
                  for t in ('2つ','２つ','二つ','2 つ')):
-                continue
+                raise ValueError('multiple selection count missing')
             q['source']={'kind':'original',
                          'label':'AI Study Auto-generated / AI review pending'}
             q['review_status']='ai_review_pending'
             q['language']='ja'
-            found[q['id']]=q
-        except (ValueError,KeyError,TypeError):
-            continue
-    return [found[s['id']] for s in specs if s['id'] in found]
+            found[qid]=q
+        except (ValueError,KeyError,TypeError) as exc:
+            errors.append(str(qid)+' invalid schema: '+str(exc)[:90])
+    # Avoid logging the generated question content, which could contain sensitive text.
+    if errors:print('[FAST][FORMAT]', '; '.join(errors[:5]),flush=True)
+    return [found[item['id']] for item in specs if item['id'] in found]
 
 class API(a.Clients):
     def call(self, provider, prompt, payload):
@@ -159,11 +170,106 @@ class API(a.Clients):
             return {'reviews':[{'id':q['id'],**super().fake('gemini',a.REVIEW_PROMPT,q)} for q in payload['questions']]}
         return super().fake(provider,prompt,payload)
 
-def specs_for(state,n):
+# SAA-C03 exam-domain targets: D1 30%, D2 26%, D3 24%, D4 20%.
+# Each slot selects a knowledge-specific blueprint instead of repeating generic topics.
+# This is a *generation allocation*, not a claim about actual AWS exam question frequencies.
+SAA_WEIGHTS={'D1':30,'D2':26,'D3':24,'D4':20}
+SAA_BLUEPRINT={
+ 'D1':[
+  'IAM Identity Center / SCP / permissions boundary の使い分け',
+  'IAM Access Analyzer を使う外部共有リスク',
+  'KMS キーポリシー / 暗号化の権限分離',
+  'VPC Interface Endpoint と PrivateLink の通信制御',
+  'Security Groups / NACL / Network Firewall の選択',
+  'WAF / Shield / CloudFront のレイヤ別保護',
+  'Secrets Manager と Systems Manager Parameter Store の使い分け',
+  'AWS Organizations と複数アカウントのガバナンス',
+  'Amazon Cognito とアプリ利用者認証',
+  'CloudTrail / Config / GuardDuty の監査・検知'
+ ],
+ 'D2':[
+  'Multi-AZ と Multi-Region の障害範囲の判断',
+  'RTO / RPO に応じた DR 戦略と Elastic Disaster Recovery',
+  'AWS Backup によるクロスアカウント・クロスリージョン保護',
+  'Route 53 フェイルオーバーとヘルスチェック',
+  'SQS / SNS / EventBridge による疎結合',
+  'Aurora Global Database とデータ復旧設計',
+  'S3 バージョニングとクロスリージョンレプリケーション',
+  'ELB / Auto Scaling の障害時の回復',
+  'Step Functions による失敗時の再試行',
+  'EFS / FSx / EBS の冗長化と共有要件'
+ ],
+ 'D3':[
+  'EC2 ファミリー選択とコンピューティング性能',
+  'Auto Scaling と負荷指標の選択',
+  'CloudFront / Global Accelerator のネットワーク性能差',
+  'DynamoDB オンデマンド・プロビジョンド容量',
+  'Aurora Replica と RDS Read Replica の性能',
+  'ElastiCache / DAX のキャッシュ選択',
+  'EBS gp3 / io2 / instance store の IOPS とレイテンシ',
+  'S3 Transfer Acceleration / Multipart Upload',
+  'Direct Connect / VPN / DataSync の転送要件',
+  'Amazon FSx for Lustre / Windows File Server の性能要件'
+ ],
+ 'D4':[
+  'Compute Savings Plans / Reserved Instances / Spot の選択',
+  'S3 Intelligent-Tiering / Lifecycle / Glacier の比較',
+  'AWS Compute Optimizer による適正サイズ',
+  'NAT Gateway / VPC Endpoint のコストトレードオフ',
+  'データ転送料金と CloudFront キャッシュによる最適化',
+  'DynamoDB オンデマンドとプロビジョンドの料金比較',
+  'RDS / Aurora / Serverless の課金モデル',
+  'Cost Explorer / Budgets / Cost Anomaly Detection の役割',
+  'EBS / EFS / FSx のストレージ料金とアクセス',
+  'Lambda / Fargate / EC2 の利用特性別コスト'
+ ]
+}
+def _saa_domain_slots():
+    # Smooth weighted scheduling, exactly 100 slots; stable across restarts.
+    counts={d:0 for d in SAA_WEIGHTS}
+    slots=[]
+    for i in range(100):
+        domain=max(SAA_WEIGHTS, key=lambda d:(i+1)*SAA_WEIGHTS[d]/100-counts[d])
+        slots.append(domain)
+        counts[domain]+=1
+    assert counts==SAA_WEIGHTS
+    return tuple(slots)
+
+SAA_DOMAIN_SLOTS=_saa_domain_slots()
+
+def _topic_usage(state, existing):
+    """Count covered topic *labels* only. Conservative heuristic, not semantic clustering."""
+    usage={}
+    pool=list(existing)
+    for part in ('existing','generated','pending'):
+        for item in (state.get(part) or {}).values():
+            q=item.get('candidate',item) if isinstance(item,dict) else None
+            if isinstance(q,dict):pool.append(q)
+    seen=set()
+    for q in pool:
+        if not isinstance(q,dict):continue
+        uid=q.get('id')
+        if uid and uid in seen:continue
+        if uid:seen.add(uid)
+        topic=str(q.get('topic') or '').strip()
+        domain=str(q.get('domain') or '')
+        if topic:usage[(domain,topic)]=usage.get((domain,topic),0)+1
+    return usage
+
+
+def specs_for(state,n,existing=()):
+    """Weighted domain allocation, select the least-covered topic within each domain."""
+    usage=_topic_usage(state,existing)
     specs=[]
     for ix in range(state['generated_index'],state['generated_index']+n):
-        d,t=a.TOPICS[ix%len(a.TOPICS)]
-        specs.append({'id':f'SAA-AUTO-{ix+1:05d}','domain':d,'topic':t,
+        domain=SAA_DOMAIN_SLOTS[ix%100]
+        topics=SAA_BLUEPRINT[domain]
+        # Stable tie breaker rotates topics to avoid always using the first.
+        offset=(ix//100+ix%100)%len(topics)
+        topic=min((topics[(offset+j)%len(topics)] for j in range(len(topics))),
+                  key=lambda t:usage.get((domain,t),0))
+        usage[(domain,topic)]=usage.get((domain,topic),0)+1
+        specs.append({'id':f'SAA-AUTO-{ix+1:05d}','domain':domain,'topic':topic,
                       'type':'multiple' if ix%4==3 else 'single',
                       'difficulty':'上級' if ix%3==2 else '中級'})
     return specs
@@ -186,6 +292,29 @@ def judge(api,qs):
         except (ValueError,KeyError,TypeError):
             if attempt:raise
     return {}
+
+def question_is_near_duplicate(candidate, existing, state, threshold=0.88):
+    """Conservative text overlap gate, not a semantic equivalence classifier."""
+    def normalized(q):
+        return re.sub(r'[\\W_]+', '', str(q.get('question', '')).lower())
+    new=normalized(candidate)
+    if len(new)<25:
+        return False
+    others=list(existing)
+    for part in ('existing','generated','pending'):
+        for item in (state.get(part) or {}).values():
+            q=item.get('candidate',item) if isinstance(item,dict) else None
+            if isinstance(q,dict) and q.get('id')!=candidate.get('id'):
+                others.append(q)
+    for old in others:
+        if not isinstance(old,dict) or old.get('id')==candidate.get('id'):
+            continue
+        text=normalized(old)
+        if len(text)<25:continue
+        if new==text or difflib.SequenceMatcher(None,new,text,autojunk=False).ratio()>=threshold:
+            return True
+    return False
+
 
 def count_approved(state):
     generated=state.get('generated') or {}
@@ -287,6 +416,12 @@ def run_fast(*,demo=False,force=False,generate_only=False):
     def keep(q,review,part):
         status={'BLOCK':'BLOCKED','REVISE':'REVISE_UNRESOLVED'}.get(review['verdict'])
         if status is None:status='AI_PASS' if part=='existing' or a.meets_exam_quality(review) else 'NEEDS_QUALITY_UPGRADE'
+        if part=='generated' and status=='AI_PASS' and question_is_near_duplicate(q, existing, state):
+            status='DUPLICATE_HOLD'  # Never approve a near-duplicate automatically.
+        if part=='generated' and status=='AI_PASS':
+            # A model's self-reported PASS is not documentation verification.
+            # Require an explicit human/content approval for generated material.
+            status='QUALITY_HOLD'
         state[part][q['id']]={'status':status,'candidate':q,'audit':[{'role':'gemini','review':review}],
                               'official_documentation_verified':False,'human_approved':False}
         log.append(q['id']+': '+status)
@@ -356,7 +491,7 @@ def run_fast(*,demo=False,force=False,generate_only=False):
         while (attempted<GEN_DAILY and api.calls+4<=api.limit
                and goal_progress(state)<GOAL_TOTAL):
             group=specs_for(state,min(GROUP,GEN_DAILY-attempted,
-                                      GOAL_TOTAL-goal_progress(state)))
+                                      GOAL_TOTAL-goal_progress(state)),existing)
             progress('RUNNING','OpenAI一括生成',str([s['id'] for s in group]))
             proposals=make_safe(group)
             state['generated_index']+=len(group);attempted+=len(group)

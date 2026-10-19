@@ -11,7 +11,7 @@ wanted=['daily_call_cap','count_approved','existing_approved','goal_progress',
 for n in wanted:
     assert n in functions,n
 scope={'CAMPAIGN_START':'2026-10-19','CUTOFF':'2026-10-28',
-       'GOAL_TOTAL':200,'CAMPAIGN_DAILY_CAP':300,
+       'GOAL_TOTAL':200,'CAMPAIGN_DAILY_CAP':25,
        'CALL_CAP':25,'ONE_TIME_EXTRA_DATE':'2026-10-18','ONE_TIME_EXTRA_LIMIT':50}
 day=['2026-10-19']
 scope['a']=SimpleNamespace(today=lambda:day[0])
@@ -21,8 +21,8 @@ exec(compile(module,'<campaign tests>','exec'),scope)
 cap=scope['daily_call_cap']
 assert cap('2026-10-17')==25
 assert cap('2026-10-18')==50
-assert cap('2026-10-19')==300
-assert cap('2026-10-28')==300
+assert cap('2026-10-19')==25
+assert cap('2026-10-28')==25
 assert cap('2026-10-29')==25
 
 s={'last_attempt':'2026-10-19',
@@ -32,7 +32,7 @@ s={'last_attempt':'2026-10-19',
 assert scope['goal_progress'](s)==2, 'Never count unresolved or unreviewed'
 assert scope['used_today'](s)==23
 assert "state['history']=state['history'][-1200:]" in source, 'Daily cap must retain enough call history'
-assert scope['campaign_due'](s),'A prior run may continue within daily budget'
+assert not scope['campaign_due'](s),'Only two requests remain, insufficient for an extra batch'
 s['history'].append({'date':'2026-10-19','calls':275,'errors':[]})
 assert not scope['campaign_due'](s),'Only 2 requests remain'
 s['history'][-1]['calls']=250
@@ -44,16 +44,16 @@ assert scope['goal_progress'](s)==200
 assert not scope['campaign_due'](s),'200 PASS means stop'
 s['generated'].pop('0')
 assert scope['goal_progress'](s)==199
-assert scope['campaign_due'](s),'Below goal must continue while budget remains'
+assert not scope['campaign_due'](s),'Must stop when budget remaining is insufficient'
 day[0]='2026-10-29'
 assert not scope['campaign_due'](s),'Never spend after exam preparation deadline'
 day[0]='2026-10-18'
 assert not scope['campaign_due'](s),'Campaign must not retroactively spend prior date'
 
-assert 'GEN_DAILY=200' in source, 'Do not silently cap at twenty attempts'
+assert 'GEN_DAILY=4' in source, 'Do not silently cap at twenty attempts'
 assert "and goal_progress(state)<GOAL_TOTAL" in source, 'Stop at goal in-batch'
 assert "'campaign_paused_date'" in source
 assert 'campaign_due(_read_obj(ROOT/' in source
 assert "batch-new-only' if (post_fix or campaign)" in source
 assert 'GOAL_TOTAL-goal_progress(state)' in source
-print('PASS: Gemini-only approved goal, date-scoped 300/day, reuse remaining budget, stop at 200, no-progress pause')
+print('PASS: Gemini-only approved goal, date-scoped 25/day, reuse remaining budget, stop at 200, no-progress pause')
