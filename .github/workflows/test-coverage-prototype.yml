@@ -1,0 +1,17 @@
+name: Test SAA Coverage Prototype
+on:
+  push:
+    branches:
+      - feature/saa-coverage-quality-gate
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile proposed change
+        run: python3 -m py_compile release_files/update_watchdog.py
+      - name: Test 4-domain allocation and duplicate hold
+        run: python3 tests/test_coverage_quality.py
