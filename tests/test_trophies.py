@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-spec=importlib.util.spec_from_file_location('trophies','release_files/trophies.py')
+spec=importlib.util.spec_from_file_location('live_progress','release_files/live_progress.py')
 t=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(t)
 js=t.TROPHY_UI.split('<script id="ai-study-trophy-script">',1)[-1].split('</script>',1)[0]
@@ -25,7 +25,7 @@ with tempfile.TemporaryDirectory() as root:
     (study/'sw.js').write_text("const CACHE='ai-study-v0.9';\n",encoding='utf-8')
     original_questions=json.dumps({'questions':[{'id':'SAA-ORIG-0001','question':'How do IAM roles work?'}]},ensure_ascii=False)
     (study/'questions.json').write_text(original_questions,encoding='utf-8')
-    assert t.install(study) is True
+    assert t.install_trophy_ui(study) is True
     final=(study/'index.html').read_text(encoding='utf-8')
     assert t.SAVE_PATCHED in final and t.RENDER_PATCHED in final
     assert t.MARKER in final
@@ -39,7 +39,7 @@ with tempfile.TemporaryDirectory() as root:
     bad=Path(root)/'unknown';bad.mkdir()
     (bad/'index.html').write_text('<body>Another app</body>',encoding='utf-8')
     (bad/'sw.js').write_text("const CACHE='ai-study-v1';",encoding='utf-8')
-    try:t.install(bad)
+    try:t.install_trophy_ui(bad)
     except ValueError:pass
     else:raise AssertionError("Unknown app should remain unchanged")
     assert (bad/'index.html').read_text(encoding='utf-8')=='<body>Another app</body>'
