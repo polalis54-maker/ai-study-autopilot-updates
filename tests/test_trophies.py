@@ -5,10 +5,17 @@ import re
 import subprocess
 import tempfile
 from pathlib import Path
+import sys
 
 spec=importlib.util.spec_from_file_location('live_progress','release_files/live_progress.py')
 t=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(t)
+# The same module is also run as a CLI script to publish Netlify updates.
+# Defining the installer after the __main__ dispatch caused NameError at deploy time.
+src=Path('release_files/live_progress.py').read_text(encoding='utf-8')
+assert src.index('def install_trophy_ui(') < src.index("if __name__=='__main__':"), "Trophy functions must exist before CLI dispatch"
+cli=subprocess.run([sys.executable,'release_files/live_progress.py','status-mobile'],capture_output=True,text=True,check=True)
+assert cli.returncode==0
 js=t.TROPHY_UI.split('<script id="ai-study-trophy-script">',1)[-1].split('</script>',1)[0]
 assert "window.trophyRefresh=trophyRefresh" in js
 assert "window.trophyRender=trophyRender" in js
