@@ -622,34 +622,59 @@ trophyRender();
 <!-- AI_STUDY_GROWTH_V1 -->
 <style id="ai-study-growth-style">
 .growth-card{background:linear-gradient(145deg,#342344,#182c48);border:1px solid #ac78c2}
-.growth-track{height:10px;background:#12182d;border-radius:15px;overflow:hidden;margin:9px 0}
-.growth-track span{display:block;height:100%;background:linear-gradient(90deg,#fdc47b,#f48ed9)}
-.growth-modal{position:fixed;inset:0;z-index:180;display:flex;align-items:center;justify-content:center;background:#05091bdc;padding:12px}
+.growth-track{height:9px;background:#141b32;border-radius:10px;overflow:hidden;margin:9px 0}
+.growth-track>span{display:block;height:100%;background:linear-gradient(90deg,#f7bd70,#f690d8)}
+.growth-modal{position:fixed;inset:0;z-index:180;display:flex;align-items:center;justify-content:center;padding:10px;background:#05091be6}
 .growth-modal[hidden]{display:none!important}
-.growth-panel{max-height:88dvh;overflow:auto;width:min(640px,100%);background:#1b2540;border:1px solid #d38bc3;border-radius:18px;padding:18px;color:#ebf0ff}
-.growth-panel header{display:flex;justify-content:space-between;align-items:center;gap:12px}
-.growth-unlocks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:14px}
-.growth-unlock{background:#283556;border-radius:12px;padding:12px;border:1px solid #637397;font-size:12px}
+.growth-panel{width:min(680px,100%);max-height:calc(100dvh - 20px);overflow:auto;background:#1b2540;border:1px solid #d38bc3;border-radius:16px;padding:14px;color:#ebf0ff}
+.growth-panel header{display:flex;gap:12px;justify-content:space-between;align-items:center;margin-bottom:12px}
+.growth-panel header h2{margin:0;font-size:clamp(18px,4.5vw,23px)}
+.growth-panel header button{white-space:nowrap;flex-shrink:0;padding:10px 13px}
+.growth-stage{border-radius:18px;background:radial-gradient(circle at 25% 15%,#7c5584,#232a51 65%);border:1px solid #86709d;padding:16px;display:flex;align-items:center;gap:18px;overflow:hidden}
+.growth-stage[data-scene="sakura"]{background:radial-gradient(circle at 20% 10%,#d983ad,#8d538a,#2b3158)}
+.growth-stage[data-scene="night"]{background:radial-gradient(circle at 70% 10%,#477ab2,#232958,#0d152c)}
+.growth-stage[data-scene="sparkle"]{background:radial-gradient(circle at 20% 20%,#ffd48a,#ae6ba0,#382454)}
+.growth-stage[data-scene="lab"]{background:linear-gradient(135deg,#276f75,#2e3c69,#1c2850)}
+.growth-stage[data-scene="royal"]{background:radial-gradient(circle,#ad87d4,#5a4687,#24244c)}
+.growth-portrait{width:min(42%,210px);aspect-ratio:1;flex-shrink:0;border:3px solid #ffcaee;border-radius:50%;overflow:hidden;box-shadow:0 0 27px #eca9ee99;background:#34385e}
+.growth-portrait img{display:block;width:100%;height:100%;object-fit:cover}
+.growth-stage[data-scene="sparkle"] .growth-portrait,.growth-stage[data-scene="royal"] .growth-portrait{box-shadow:0 0 39px #ffe7a0}
+.growth-info{min-width:0;flex:1}
+.growth-info b{color:#ffe8b5;font-size:19px}
+.growth-info .tiny{color:#ecdeff}
+.growth-speech{margin-top:12px;background:#ffeaf8;color:#553c59;border-radius:11px;padding:12px;font-size:13px;font-weight:650;line-height:1.6}
+.growth-actions{display:flex;gap:8px;margin-top:10px}
+.growth-actions button{flex:1;padding:10px;min-width:0}
+.growth-scenes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:11px 0}
+.growth-scenes button{border:1px solid #7183b0;background:#2b3a5b;color:#f1ecff;border-radius:10px;padding:10px 4px;font-size:12px}
+.growth-scenes button[aria-pressed="true"]{border:2px solid #ffbde4;background:#68476e}
+.growth-scenes button:disabled{opacity:.42}
+.growth-unlocks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.growth-unlock{background:#283556;border-radius:12px;padding:11px;border:1px solid #637397;font-size:12px}
 .growth-unlock.locked{opacity:.55;filter:grayscale(.75)}
-.growth-unlock strong{display:block;font-size:14px;margin:5px 0;color:#ffe2a8}
-@media(max-width:400px){.growth-unlocks{grid-template-columns:1fr}}
+.growth-unlock strong{display:block;color:#ffe2a8;margin:5px 0}
+@media(max-width:440px){.growth-stage{flex-direction:column;gap:8px}.growth-portrait{width:min(55vw,190px)}.growth-info{text-align:center}.growth-scenes{grid-template-columns:repeat(2,minmax(0,1fr))}.growth-unlocks{grid-template-columns:1fr}}
 </style>
 <script id="ai-study-growth-script">
 (()=>{
 'use strict';
 const $g=id=>document.getElementById(id);
 const rewards=[
-[1,'🎀','いつものアイ先生','基本スタイル'],
-[2,'😊','笑顔','レベルアップ記念'],
-[3,'📚','勉強机','学びの拠点'],
-[5,'🎤','応援ボイス','ご褒美の解放記録'],
-[7,'💖','特別な表情','がんばった記念'],
-[8,'🖤','私服スタイル','衣装解放記念'],
-[10,'🌟','きらきらエフェクト','努力の証'],
-[15,'🔬','研究者スタイル','研究者衣装の解放記録'],
-[20,'👑','クラウドの相棒','特別称号'],
+[1,'🎀','いつものアイ先生','アイ先生と学習開始'],
+[2,'😊','笑顔','一緒に学習しよう'],
+[3,'🌸','桜色ルーム','背景を変更できる'],
+[5,'💬','応援メッセージ','会話ボタンで応援'],
+[7,'🌙','星空ルーム','背景を変更できる'],
+[8,'🖤','衣装の解放記録','衣装画像は制作待ち'],
+[10,'✨','きらきら演出','背景を変更できる'],
+[15,'🔬','クラウドラボ','背景を変更できる'],
+[20,'👑','クラウドの相棒','ロイヤル背景を解放'],
 [30,'💝','特別な応援','継続へのメッセージ']
 ];
+const scenes=[['base',1,'💛 いつもの部屋'],['sakura',3,'🌸 桜色'],['night',7,'🌙 星空'],['sparkle',10,'✨ きらきら'],['lab',15,'🔬 ラボ'],['royal',20,'👑 ロイヤル']];
+const storageKey='ai-study-growth-scene-v1';
+let selected='base',talk=0;
+try{selected=localStorage.getItem(storageKey)||'base'}catch(e){}
 function calculate(){
  const rows=Array.isArray(attempts)?attempts:[];
  const unique=new Set(),recovered=new Set(),mistakes=new Set();
@@ -662,38 +687,60 @@ function calculate(){
   }else if(key){mistakes.add(key);recovered.delete(key)}
   if(key)unique.add(key);
  }
- const perfect=Array.isArray(perfectAwards)?perfectAwards.length:0;
- xp+=perfect*25;
+ const perfect=Array.isArray(perfectAwards)?perfectAwards.length:0;xp+=perfect*25;
  let level=1,threshold=100,remaining=xp;
  while(remaining>=threshold&&level<100){remaining-=threshold;level++;threshold=100+Math.floor((level-1)/5)*50}
  return {xp,level,remaining,next:level>=100?0:threshold,correct,answered:rows.length,perfect,recoveries};
 }
+function stageName(n){return n>=20?'👑 クラウドの相棒':n>=10?'✨ ベテランの相棒':n>=5?'💖 頼れるパートナー':'🌱 新米パートナー'}
 function summary(s){
- const percent=s.next?Math.min(100,Math.round(s.remaining/s.next*100)):100;
- const unlocked=rewards.filter(r=>s.level>=r[0]).length;
- return '<div style="display:flex;gap:14px;align-items:center"><div aria-label="アイ先生" style="font-size:46px">💛</div><div style="flex:1"><b>💕 アイ先生 Lv.'+s.level+'</b><div class="tiny">累計 '+s.xp+' XP ・ 報酬 '+unlocked+'/'+rewards.length+'</div><div class="growth-track"><span style="width:'+percent+'%"></span></div><div class="tiny">'+(s.next?s.remaining+'/'+s.next+' XP':'最大レベル！')+'</div></div></div>';
+ const pct=s.next?Math.round(s.remaining/s.next*100):100;
+ return '<b>💕 アイ先生 Lv.'+s.level+'</b><div class="tiny">'+stageName(s.level)+'</div><div class="tiny">累計 '+s.xp+' XP ・ 報酬 '+rewards.filter(r=>s.level>=r[0]).length+'/'+rewards.length+'</div><div class="growth-track"><span style="width:'+pct+'%"></span></div><div class="tiny">'+(s.next?s.remaining+'/'+s.next+' XP':'最大レベル！')+'</div>';
 }
 function ensureModal(){
  if($g('growthModal'))return;
  const node=document.createElement('div');node.id='growthModal';node.className='growth-modal';node.hidden=true;
- node.innerHTML='<section class="growth-panel" role="dialog" aria-modal="true"><header><h2>💕 アイ先生 育成ルーム</h2><button class="btn secondary" type="button" id="growthClose">閉じる ×</button></header><div id="growthSummary"></div><div class="growth-unlocks" id="growthRewards"></div><p class="tiny">学習履歴からXPを算出。報酬は解放状態のみで、衣装画像やボイスは今後対応予定です。</p></section>';
- document.body.appendChild(node);$g('growthClose').addEventListener('click',()=>node.hidden=true);
+ node.innerHTML='<section class="growth-panel" role="dialog" aria-modal="true" aria-labelledby="growthTitle"><header><h2 id="growthTitle">💕 アイ先生 育成ルーム</h2><button class="btn secondary" id="growthClose" type="button">閉じる ×</button></header>'+
+ '<div class="growth-stage" id="growthStage" data-scene="base"><div class="growth-portrait"><img src="./ai-teacher-avatar.webp" alt="オリジナルのアイ先生" width="346" height="350"></div><div class="growth-info" id="growthSummary"></div></div>'+
+ '<div class="growth-speech" id="growthSpeech" aria-live="polite">ユウ、今日も一緒に頑張ろうねっ💕</div>'+
+ '<div class="growth-actions"><button class="btn secondary" id="growthTalk" type="button">💬 話す</button><button class="btn secondary" id="growthPractice" type="button">📚 勉強する</button></div>'+
+ '<h3 style="font-size:15px;margin:20px 0 8px">🎨 解放したルームを選ぼう</h3><div class="growth-scenes" id="growthScenes"></div>'+
+ '<h3 style="font-size:15px;margin:20px 0 8px">🎁 成長報酬</h3><div class="growth-unlocks" id="growthRewards"></div>'+
+ '<p class="tiny">XPは学習履歴から算出。背景・演出は実際に切替可能。衣装画像・音声は今後追加するよ。</p></section>';
+ document.body.appendChild(node);
+ $g('growthClose').addEventListener('click',()=>node.hidden=true);
  node.addEventListener('click',e=>{if(e.target===node)node.hidden=true});
  document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!node.hidden)node.hidden=true});
+ $g('growthTalk').addEventListener('click',()=>{
+  const s=calculate(),lines=['ユウ、今日も会いに来てくれたんだね💕','いまLv.'+s.level+'！これまでの努力が形になってるよ✨','間違えた問題こそ伸びしろ！一緒に復習しよっ','累計'+s.answered+'問！少しずつでも強くなってるね'];
+  $g('growthSpeech').textContent=lines[talk++%lines.length];
+ });
+ $g('growthPractice').addEventListener('click',()=>{node.hidden=true;const b=document.querySelector('.tab[data-tab="study"]');if(b)b.click()});
+ $g('growthScenes').addEventListener('click',e=>{
+  const b=e.target.closest('button[data-scene]');if(!b||b.disabled)return;
+  selected=b.dataset.scene;try{localStorage.setItem(storageKey,selected)}catch(e){}
+  updateModal();$g('growthSpeech').textContent='背景を変えたよ！気分一新、勉強しよっ✨';
+ });
 }
-function open(){ensureModal();const s=calculate();$g('growthSummary').innerHTML=summary(s)+'<p class="tiny">回答 '+s.answered+'問 ／ 正解 '+s.correct+'問 ／ 復習成功 '+s.recoveries+'回 ／ 満点 '+s.perfect+'回</p>';
+function updateModal(){
+ const s=calculate();
+ if(!scenes.some(r=>r[0]===selected&&s.level>=r[1]))selected='base';
+ $g('growthStage').dataset.scene=selected;
+ $g('growthSummary').innerHTML=summary(s)+'<p class="tiny">回答'+s.answered+'問 ／ 正解'+s.correct+'問<br>復習成功'+s.recoveries+'回 ／ 満点'+s.perfect+'回</p>';
+ $g('growthScenes').innerHTML=scenes.map(r=>'<button type="button" data-scene="'+r[0]+'" aria-pressed="'+(selected===r[0])+'" '+(s.level<r[1]?'disabled':'')+'>'+r[2]+'<br><small>'+(s.level>=r[1]?'解放済み':'Lv.'+r[1]+'で解放')+'</small></button>').join('');
  $g('growthRewards').innerHTML=rewards.map(r=>'<div class="growth-unlock '+(s.level<r[0]?'locked':'')+'"><span>Lv.'+r[0]+' '+r[1]+'</span><strong>'+r[2]+' '+(s.level>=r[0]?'✓':'🔒')+'</strong><small>'+r[3]+'</small></div>').join('');
- $g('growthModal').hidden=false;
 }
+function open(){ensureModal();updateModal();$g('growthModal').hidden=false}
 function render(){
  const main=document.querySelector('#screen-home .home-main');if(!main)return;
  ensureModal();let card=$g('growthHomeCard');
  if(!card){card=document.createElement('section');card.className='card dash-card growth-card';card.id='growthHomeCard';main.insertBefore(card,main.querySelector('.home-split')||main.firstChild)}
- const s=calculate();card.innerHTML='<h2>💕 アイ先生の育成</h2>'+summary(s)+'<button class="btn secondary" type="button" id="growthOpen" style="width:100%;margin-top:12px">育成ルームを見る →</button>';
- $g('growthOpen').addEventListener('click',open);if(!$g('growthModal').hidden)open();
+ const s=calculate();
+ card.innerHTML='<h2>💕 アイ先生の育成</h2><div style="display:flex;gap:12px;align-items:center"><img src="./ai-teacher-avatar.webp" alt="アイ先生" width="76" height="76" style="border-radius:50%;border:2px solid #f4ade5;object-fit:cover">'+summary(s)+'</div><button class="btn secondary" type="button" id="growthOpen" style="width:100%;margin-top:12px">アイ先生に会う・ルームを育てる →</button>';
+ $g('growthOpen').addEventListener('click',open);if(!$g('growthModal').hidden)updateModal();
 }
 window.aiGrowthRender=render;
-render(); // Show the growth card on initial page load, not only after tab changes.
+render();
 })();
 </script>
 """
