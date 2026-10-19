@@ -686,13 +686,14 @@ function open(){ensureModal();const s=calculate();$g('growthSummary').innerHTML=
  $g('growthModal').hidden=false;
 }
 function render(){
- const side=document.querySelector('#screen-home .home-sidebar');if(!side)return;
+ const main=document.querySelector('#screen-home .home-main');if(!main)return;
  ensureModal();let card=$g('growthHomeCard');
- if(!card){card=document.createElement('section');card.className='card dash-card growth-card';card.id='growthHomeCard';side.insertBefore(card,side.firstChild)}
+ if(!card){card=document.createElement('section');card.className='card dash-card growth-card';card.id='growthHomeCard';main.insertBefore(card,main.querySelector('.home-split')||main.firstChild)}
  const s=calculate();card.innerHTML='<h2>💕 アイ先生の育成</h2>'+summary(s)+'<button class="btn secondary" type="button" id="growthOpen" style="width:100%;margin-top:12px">育成ルームを見る →</button>';
  $g('growthOpen').addEventListener('click',open);if(!$g('growthModal').hidden)open();
 }
 window.aiGrowthRender=render;
+render(); // Show the growth card on initial page load, not only after tab changes.
 })();
 </script>
 """
