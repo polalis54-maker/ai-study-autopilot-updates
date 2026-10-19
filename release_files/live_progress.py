@@ -326,7 +326,7 @@ MARKER="<!-- AI_STUDY_TROPHIES_V1 -->"
 SAVE_ORIGINAL="function save(){return commitState()}"
 SAVE_PATCHED="function save(){const ok=commitState();if(ok&&typeof trophyRefresh==='function')trophyRefresh();return ok}"
 RENDER_ORIGINAL="function render(){({home:renderHome,study:renderStudy,review:renderReview,analysis:renderAnalysis,manage:renderManage}[tab])();if(!session || tab!=='study'){let [line,mood]=defaultAiLine(tab);sayAi(line,mood)}syncTeacherActions()}"
-RENDER_PATCHED=RENDER_ORIGINAL[:-1]+";if(typeof trophyRender==='function')trophyRender()}"
+RENDER_PATCHED=RENDER_ORIGINAL[:-1]+";if(typeof trophyRender==='function')trophyRender();if(typeof aiGrowthRender==='function')aiGrowthRender()}"
 
 TROPHY_UI=r"""
 <style id="ai-study-trophy-style">
@@ -618,6 +618,83 @@ previous=new Set(earned(metrics()).map(t=>t[0]));
 trophyRender();
 })();
 </script>
+
+<!-- AI_STUDY_GROWTH_V1 -->
+<style id="ai-study-growth-style">
+.growth-card{background:linear-gradient(145deg,#342344,#182c48);border:1px solid #ac78c2}
+.growth-track{height:10px;background:#12182d;border-radius:15px;overflow:hidden;margin:9px 0}
+.growth-track span{display:block;height:100%;background:linear-gradient(90deg,#fdc47b,#f48ed9)}
+.growth-modal{position:fixed;inset:0;z-index:180;display:flex;align-items:center;justify-content:center;background:#05091bdc;padding:12px}
+.growth-modal[hidden]{display:none!important}
+.growth-panel{max-height:88dvh;overflow:auto;width:min(640px,100%);background:#1b2540;border:1px solid #d38bc3;border-radius:18px;padding:18px;color:#ebf0ff}
+.growth-panel header{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.growth-unlocks{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;margin-top:14px}
+.growth-unlock{background:#283556;border-radius:12px;padding:12px;border:1px solid #637397;font-size:12px}
+.growth-unlock.locked{opacity:.55;filter:grayscale(.75)}
+.growth-unlock strong{display:block;font-size:14px;margin:5px 0;color:#ffe2a8}
+@media(max-width:400px){.growth-unlocks{grid-template-columns:1fr}}
+</style>
+<script id="ai-study-growth-script">
+(()=>{
+'use strict';
+const $g=id=>document.getElementById(id);
+const rewards=[
+[1,'🎀','いつものアイ先生','基本スタイル'],
+[2,'😊','笑顔','レベルアップ記念'],
+[3,'📚','勉強机','学びの拠点'],
+[5,'🎤','応援ボイス','ご褒美の解放記録'],
+[7,'💖','特別な表情','がんばった記念'],
+[8,'🖤','私服スタイル','衣装解放記念'],
+[10,'🌟','きらきらエフェクト','努力の証'],
+[15,'🔬','研究者スタイル','研究者衣装の解放記録'],
+[20,'👑','クラウドの相棒','特別称号'],
+[30,'💝','特別な応援','継続へのメッセージ']
+];
+function calculate(){
+ const rows=Array.isArray(attempts)?attempts:[];
+ const unique=new Set(),recovered=new Set(),mistakes=new Set();
+ let xp=0,correct=0,recoveries=0;
+ for(const r of rows){
+  if(!r||typeof r!=='object')continue;
+  const key=String(r.id||'');xp+=5;
+  if(r.correct){correct++;if(key&&!unique.has(key))xp+=10;
+   if(key&&mistakes.has(key)&&!recovered.has(key)){xp+=15;recoveries++;recovered.add(key)}
+  }else if(key){mistakes.add(key);recovered.delete(key)}
+  if(key)unique.add(key);
+ }
+ const perfect=Array.isArray(perfectAwards)?perfectAwards.length:0;
+ xp+=perfect*25;
+ let level=1,threshold=100,remaining=xp;
+ while(remaining>=threshold&&level<100){remaining-=threshold;level++;threshold=100+Math.floor((level-1)/5)*50}
+ return {xp,level,remaining,next:level>=100?0:threshold,correct,answered:rows.length,perfect,recoveries};
+}
+function summary(s){
+ const percent=s.next?Math.min(100,Math.round(s.remaining/s.next*100)):100;
+ const unlocked=rewards.filter(r=>s.level>=r[0]).length;
+ return '<div style="display:flex;gap:14px;align-items:center"><div aria-label="アイ先生" style="font-size:46px">💛</div><div style="flex:1"><b>💕 アイ先生 Lv.'+s.level+'</b><div class="tiny">累計 '+s.xp+' XP ・ 報酬 '+unlocked+'/'+rewards.length+'</div><div class="growth-track"><span style="width:'+percent+'%"></span></div><div class="tiny">'+(s.next?s.remaining+'/'+s.next+' XP':'最大レベル！')+'</div></div></div>';
+}
+function ensureModal(){
+ if($g('growthModal'))return;
+ const node=document.createElement('div');node.id='growthModal';node.className='growth-modal';node.hidden=true;
+ node.innerHTML='<section class="growth-panel" role="dialog" aria-modal="true"><header><h2>💕 アイ先生 育成ルーム</h2><button class="btn secondary" type="button" id="growthClose">閉じる ×</button></header><div id="growthSummary"></div><div class="growth-unlocks" id="growthRewards"></div><p class="tiny">学習履歴からXPを算出。報酬は解放状態のみで、衣装画像やボイスは今後対応予定です。</p></section>';
+ document.body.appendChild(node);$g('growthClose').addEventListener('click',()=>node.hidden=true);
+ node.addEventListener('click',e=>{if(e.target===node)node.hidden=true});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!node.hidden)node.hidden=true});
+}
+function open(){ensureModal();const s=calculate();$g('growthSummary').innerHTML=summary(s)+'<p class="tiny">回答 '+s.answered+'問 ／ 正解 '+s.correct+'問 ／ 復習成功 '+s.recoveries+'回 ／ 満点 '+s.perfect+'回</p>';
+ $g('growthRewards').innerHTML=rewards.map(r=>'<div class="growth-unlock '+(s.level<r[0]?'locked':'')+'"><span>Lv.'+r[0]+' '+r[1]+'</span><strong>'+r[2]+' '+(s.level>=r[0]?'✓':'🔒')+'</strong><small>'+r[3]+'</small></div>').join('');
+ $g('growthModal').hidden=false;
+}
+function render(){
+ const side=document.querySelector('#screen-home .home-sidebar');if(!side)return;
+ ensureModal();let card=$g('growthHomeCard');
+ if(!card){card=document.createElement('section');card.className='card dash-card growth-card';card.id='growthHomeCard';side.insertBefore(card,side.firstChild)}
+ const s=calculate();card.innerHTML='<h2>💕 アイ先生の育成</h2>'+summary(s)+'<button class="btn secondary" type="button" id="growthOpen" style="width:100%;margin-top:12px">育成ルームを見る →</button>';
+ $g('growthOpen').addEventListener('click',open);if(!$g('growthModal').hidden)open();
+}
+window.aiGrowthRender=render;
+})();
+</script>
 """
 
 def install_trophy_ui(study:Path)->bool:
@@ -629,7 +706,7 @@ def install_trophy_ui(study:Path)->bool:
     if original.count('</body>')!=1:
         raise ValueError('AI Study document structure unexpected')
     if MARKER in original:
-        old=re.compile(re.escape(MARKER)+r'\s*<style id="ai-study-trophy-style">.*?</style>\s*<script id="ai-study-trophy-script">.*?</script>\s*(?=</body>)',re.S)
+        old=re.compile(re.escape(MARKER)+r'\s*<style id="ai-study-trophy-style">.*?</style>\s*<script id="ai-study-trophy-script">.*?</script>\s*(?:<!-- AI_STUDY_GROWTH_V1 -->\s*<style id="ai-study-growth-style">.*?</style>\s*<script id="ai-study-growth-script">.*?</script>\s*)?(?=</body>)',re.S)
         if len(old.findall(original))!=1 or original.count(MARKER)!=1:
             raise ValueError('Unknown trophy HTML markup; patch refused safely')
         updated=old.sub(lambda _:MARKER+'\n'+TROPHY_UI,original,count=1)
