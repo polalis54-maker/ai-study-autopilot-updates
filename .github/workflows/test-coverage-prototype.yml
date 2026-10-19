@@ -15,3 +15,9 @@ jobs:
         run: python3 -m py_compile release_files/update_watchdog.py
       - name: Test 4-domain allocation and duplicate hold
         run: python3 tests/test_coverage_quality.py
+      - name: Run existing release regression tests
+        run: |
+          python3 tests/test_release.py
+          python3 tests/test_campaign.py
+          python3 tests/test_mobile.py
+          python3 tests/test_trophies.py
