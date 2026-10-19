@@ -95,3 +95,9 @@ import os
 env=dict(os.environ,ACHIEVEMENTS_SOURCE=runtime)
 subprocess.run(['node','-e',node_test],check=True,env=env)
 print('PASS: 100 achievements, runtime metrics, v1->v2 migration, no loss to question history, JS syntax')
+
+# Growth-room integration checks for the v0.5.0 release.
+assert '<!-- AI_STUDY_GROWTH_V1 -->' in t.TROPHY_UI
+assert 'window.aiGrowthRender=render' in t.TROPHY_UI
+assert 'if(typeof aiGrowthRender' in t.RENDER_PATCHED
+assert 'localStorage.setItem' not in t.TROPHY_UI
