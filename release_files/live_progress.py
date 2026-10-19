@@ -312,21 +312,6 @@ def setup_mobile_sync():
         # Keep secured configuration so that user can retry without typing PAT.
         raise
 
-if __name__=='__main__':
-    cmd=sys.argv[1:] if len(sys.argv)>1 else []
-    try:
-        if cmd==['setup-mobile']:setup_mobile_sync()
-        elif cmd==['deploy-mobile']:publish_mobile(force=True)
-        elif cmd==['status-mobile']:
-            _,_,out=mobile_paths()
-            p=out/'mobile_publish_status.json'
-            print(p.read_text(encoding='utf-8') if p.exists() else 'No mobile deployment yet')
-        else:print('Usage: py -3 live_progress.py setup-mobile|deploy-mobile|status-mobile')
-    except Exception as exc:
-        print('[MOBILE] ERROR:',str(exc)[:210])
-        sys.exit(1)
-
-
 # Inlined into an existing allowlisted updater file for compatibility with v0.4.2.
 """Idempotent achievement UI patch for AI Study PWA.
 
@@ -550,3 +535,20 @@ def install_trophy_ui(study:Path)->bool:
         restore.write_text(original,encoding='utf-8');restore.replace(path)
         raise
     return True
+
+
+if __name__=='__main__':
+    cmd=sys.argv[1:] if len(sys.argv)>1 else []
+    try:
+        if cmd==['setup-mobile']:setup_mobile_sync()
+        elif cmd==['deploy-mobile']:publish_mobile(force=True)
+        elif cmd==['status-mobile']:
+            _,_,out=mobile_paths()
+            p=out/'mobile_publish_status.json'
+            print(p.read_text(encoding='utf-8') if p.exists() else 'No mobile deployment yet')
+        else:print('Usage: py -3 live_progress.py setup-mobile|deploy-mobile|status-mobile')
+    except Exception as exc:
+        print('[MOBILE] ERROR:',str(exc)[:210])
+        sys.exit(1)
+
+
