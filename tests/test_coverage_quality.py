@@ -36,4 +36,4 @@ print("PASS: SAA domain weights, domain/topic blueprint, near-duplicate gate")
 # Verify that the generated-question quarantine is present and precedes persistence.
 assert "status='QUALITY_HOLD'" in source
 assert "mismatched fields:" in source
-assert "if q.get('topic')!=spec['topic']" in source
+assert "if 'topic' in spec and q.get('topic')!=spec['topic']" in source
