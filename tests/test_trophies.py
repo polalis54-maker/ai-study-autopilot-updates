@@ -23,6 +23,12 @@ assert "Array.isArray(attempts)" in js and "perfectAwards" in js
 assert "localStorage.setItem" not in js, "Trophy module should not mutate existing history"
 assert "fetch(" not in js, "Trophies must be local and cost zero"
 assert len(re.findall(r"(?m)^\s*\['[a-z0-9]+',",js))==30
+extras=re.findall(r'(?m)^\s*\["bonus_[a-zA-Z0-9_]+",',js)
+assert len(extras)==70, f"Expected 70 additional trophies, got {len(extras)}"
+assert 'achievements.push(...trophyExtras)' in js
+assert 'tierFilter' in js and 'trophyTierSelect' in js
+assert 'balancedCoverage' in js and 'bestRate100' in js
+
 assert len(re.findall(r"(?m)^\s*\['[a-z0-9]+',",js))==len(set(re.findall(r"(?m)^\s*\['([a-z0-9]+)',",js)))
 
 with tempfile.TemporaryDirectory() as root:
@@ -38,6 +44,16 @@ with tempfile.TemporaryDirectory() as root:
     assert t.MARKER in final
     assert final.count('ai-study-trophy-script')==1
     assert t.install_trophy_ui(study) is False, "Re-runs must not duplicate trophy UI"
+    # Simulate a previously published v1 trophy block and verify safe in-place upgrade.
+    previous=(study/'index.html').read_text(encoding='utf-8')
+    reduced=re.sub(r'const trophyExtras=\[.*?\];\nachievements.push\(\.\.\.trophyExtras\);', 'const trophyExtras=[];\nachievements.push(...trophyExtras);', previous, flags=re.S)
+    assert reduced!=previous
+    (study/'index.html').write_text(reduced,encoding='utf-8')
+    assert t.install_trophy_ui(study) is True
+    upgraded=(study/'index.html').read_text(encoding='utf-8')
+    assert upgraded==previous
+    assert upgraded.count('ai-study-trophy-script')==1
+    assert t.install_trophy_ui(study) is False
     assert (study/'questions.json').read_text(encoding='utf-8')==original_questions
     assert "ai-study-trophy-" in (study/'sw.js').read_text(encoding='utf-8')
     js_path=Path(root)/'trophies.js';js_path.write_text(js,encoding='utf-8')
@@ -51,4 +67,31 @@ with tempfile.TemporaryDirectory() as root:
     else:raise AssertionError("Unknown app should remain unchanged")
     assert (bad/'index.html').read_text(encoding='utf-8')=='<body>Another app</body>'
 
-print('PASS: 30 unique milestones, source JS syntax, existing history unchanged, duplicate-safe injection and cache refresh')
+# Evaluate the actual 100-achievement logic against representative learning history.
+runtime=js[js.index('const achievements='):js.index("let filter='all';")]+'\n'+js[js.index('function metrics(){'):js.index('function trophyTier(t)')]
+node_test="""
+const assert=require('node:assert/strict');
+const p={domains:{D1:'Security',D2:'Resilience',D3:'Performance',D4:'Costs'}};
+const before=Array.from({length:40},(_,i)=>({id:'Q'+i,domain:'D'+(i%4+1),
+  correct:(i%5!==0),confidence:'確信',ts:new Date(Date.UTC(2026,9,1)+i*60000).toISOString()}));
+const awards=[{count:10}];
+const evaluate=new Function('attempts','perfectAwards','pack',process.env.ACHIEVEMENTS_SOURCE+
+  '; return {length:achievements.length,ids:achievements.map(t=>t[0]),statistics:metrics(),earned:earned(metrics()).length};');
+const first=evaluate(before,awards,p);
+assert.equal(first.length,100);
+assert.equal(new Set(first.ids).size,100);
+assert.equal(first.statistics.domainsSeen,4);
+assert.equal(first.statistics.balancedCoverage,10);
+assert.equal(first.statistics.responses,40);
+assert.equal(first.statistics.unique,40);
+const extra={id:'Q40',domain:'D1',correct:false,confidence:'確信',ts:new Date(Date.UTC(2026,9,1)+50*60000).toISOString()};
+const second=evaluate([...before,extra],awards,p);
+assert.ok(second.statistics.bestRate20>=first.statistics.bestRate20);
+assert.ok(second.statistics.domainsMastered>=first.statistics.domainsMastered);
+assert.ok(second.earned>=first.earned);
+console.log('PASS: 100 unique trophies, four-domain coverage, and monotonic progress');
+"""
+import os
+env=dict(os.environ,ACHIEVEMENTS_SOURCE=runtime)
+subprocess.run(['node','-e',node_test],check=True,env=env)
+print('PASS: 100 achievements, runtime metrics, v1->v2 migration, no loss to question history, JS syntax')
