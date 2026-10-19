@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory() as root:
     assert t.SAVE_PATCHED in final and t.RENDER_PATCHED in final
     assert t.MARKER in final
     assert final.count('ai-study-trophy-script')==1
-    assert t.install(study) is False, "Re-runs must not duplicate trophy UI"
+    assert t.install_trophy_ui(study) is False, "Re-runs must not duplicate trophy UI"
     assert (study/'questions.json').read_text(encoding='utf-8')==original_questions
     assert "ai-study-trophy-" in (study/'sw.js').read_text(encoding='utf-8')
     js_path=Path(root)/'trophies.js';js_path.write_text(js,encoding='utf-8')
