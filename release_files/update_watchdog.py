@@ -133,7 +133,7 @@ def salvage_batch(api,specs,prompt):
                   if q.get(field)!=want]
         if mismatch:
             errors.append(str(qid)+' mismatched fields: '+','.join(mismatch));continue
-        if q.get('topic')!=spec['topic']:
+        if 'topic' in spec and q.get('topic')!=spec['topic']:
             errors.append(str(qid)+' mismatched fields: topic');continue
         try:
             a.validate(q,strict=True)
