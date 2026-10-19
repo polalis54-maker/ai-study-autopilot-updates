@@ -45,7 +45,7 @@ def daily_call_cap(day=None):
     return CALL_CAP
 
 
-G_PROMPT='''AWS SAA-C03のオリジナル日本語模擬試験を生成。specsと同じ件数を返す。中〜上級の実務シナリオ。可用性・コスト・運用負荷・DRなどの制約を2つ以上含め、誤答ももっともらしく。全選択肢の正誤理由を解説。公式問題を転載しない。JSONのみ: {"questions":[{"id":"指定ID","exam":"SAA-C03","domain":"D1","topic":"...","type":"single","question":"...","choices":{"A":"...","B":"...","C":"...","D":"..."},"correct":["A"],"explanation":"...","difficulty":"中級","language":"ja","review_status":"ai_review_pending","source":{"kind":"original","label":"AI Study Auto-generated / AI review pending"}}]} singleは4択1正解、multipleは5択2正解で問題文に「2つ選択」を明記。すべてのIDと属性を守り、省略しない。'''
+G_PROMPT='''AWS SAA-C03のオリジナル日本語模擬試験を生成。specsのdomainとtopicを必ず守り、topic固有の設計判断を主題にする。同一テーマでも要件・正答理由・誤答理由の言い換えだけにしない。マイナーサービスは要件との適合性がある場合のみ採用し、サービス名の暗記問題にはしない。specsと同じ件数を返す。中〜上級の実務シナリオ。可用性・コスト・運用負荷・DRなどの制約を2つ以上含め、誤答ももっともらしく。全選択肢の正誤理由を解説。公式問題を転載しない。JSONのみ: {"questions":[{"id":"指定ID","exam":"SAA-C03","domain":"D1","topic":"...","type":"single","question":"...","choices":{"A":"...","B":"...","C":"...","D":"..."},"correct":["A"],"explanation":"...","difficulty":"中級","language":"ja","review_status":"ai_review_pending","source":{"kind":"original","label":"AI Study Auto-generated / AI review pending"}}]} singleは4択1正解、multipleは5択2正解で問題文に「2つ選択」を明記。すべてのIDと属性を守り、省略しない。'''
 R_PROMPT=a.REVIEW_PROMPT.split('JSONオブジェクトだけ返答:')[0]+'''\n各questionsを独立かつ厳格にレビュー。全問題IDについて回答し、資料を調べたと偽らない。JSONのみ: {"reviews":[{"id":"指定ID","verdict":"PASS|REVISE|BLOCK","issues":[],"notes":"...","needs_official_verification":true,"exam_quality":{"distractor_quality":3,"scenario_realism":3,"explanation_depth":3,"difficulty_alignment":3,"reason":"..."}}]}'''
 
 FIELDS={
@@ -159,11 +159,81 @@ class API(a.Clients):
             return {'reviews':[{'id':q['id'],**super().fake('gemini',a.REVIEW_PROMPT,q)} for q in payload['questions']]}
         return super().fake(provider,prompt,payload)
 
+# SAA-C03 exam-domain targets: D1 30%, D2 26%, D3 24%, D4 20%.
+# Each slot selects a knowledge-specific blueprint instead of repeating generic topics.
+# This is a *generation allocation*, not a claim about actual AWS exam question frequencies.
+SAA_WEIGHTS={'D1':30,'D2':26,'D3':24,'D4':20}
+SAA_BLUEPRINT={
+ 'D1':[
+  'IAM Identity Center / SCP / permissions boundary の使い分け',
+  'IAM Access Analyzer を使う外部共有リスク',
+  'KMS キーポリシー / 暗号化の権限分離',
+  'VPC Interface Endpoint と PrivateLink の通信制御',
+  'Security Groups / NACL / Network Firewall の選択',
+  'WAF / Shield / CloudFront のレイヤ別保護',
+  'Secrets Manager と Systems Manager Parameter Store の使い分け',
+  'AWS Organizations と複数アカウントのガバナンス',
+  'Amazon Cognito とアプリ利用者認証',
+  'CloudTrail / Config / GuardDuty の監査・検知'
+ ],
+ 'D2':[
+  'Multi-AZ と Multi-Region の障害範囲の判断',
+  'RTO / RPO に応じた DR 戦略と Elastic Disaster Recovery',
+  'AWS Backup によるクロスアカウント・クロスリージョン保護',
+  'Route 53 フェイルオーバーとヘルスチェック',
+  'SQS / SNS / EventBridge による疎結合',
+  'Aurora Global Database とデータ復旧設計',
+  'S3 バージョニングとクロスリージョンレプリケーション',
+  'ELB / Auto Scaling の障害時の回復',
+  'Step Functions による失敗時の再試行',
+  'EFS / FSx / EBS の冗長化と共有要件'
+ ],
+ 'D3':[
+  'EC2 ファミリー選択とコンピューティング性能',
+  'Auto Scaling と負荷指標の選択',
+  'CloudFront / Global Accelerator のネットワーク性能差',
+  'DynamoDB オンデマンド・プロビジョンド容量',
+  'Aurora Replica と RDS Read Replica の性能',
+  'ElastiCache / DAX のキャッシュ選択',
+  'EBS gp3 / io2 / instance store の IOPS とレイテンシ',
+  'S3 Transfer Acceleration / Multipart Upload',
+  'Direct Connect / VPN / DataSync の転送要件',
+  'Amazon FSx for Lustre / Windows File Server の性能要件'
+ ],
+ 'D4':[
+  'Compute Savings Plans / Reserved Instances / Spot の選択',
+  'S3 Intelligent-Tiering / Lifecycle / Glacier の比較',
+  'AWS Compute Optimizer による適正サイズ',
+  'NAT Gateway / VPC Endpoint のコストトレードオフ',
+  'データ転送料金と CloudFront キャッシュによる最適化',
+  'DynamoDB オンデマンドとプロビジョンドの料金比較',
+  'RDS / Aurora / Serverless の課金モデル',
+  'Cost Explorer / Budgets / Cost Anomaly Detection の役割',
+  'EBS / EFS / FSx のストレージ料金とアクセス',
+  'Lambda / Fargate / EC2 の利用特性別コスト'
+ ]
+}
+def _saa_domain_slots():
+    # Smooth weighted scheduling, exactly 100 slots; stable across restarts.
+    counts={d:0 for d in SAA_WEIGHTS}
+    slots=[]
+    for i in range(100):
+        domain=max(SAA_WEIGHTS, key=lambda d:(i+1)*SAA_WEIGHTS[d]/100-counts[d])
+        slots.append(domain)
+        counts[domain]+=1
+    assert counts==SAA_WEIGHTS
+    return tuple(slots)
+
+SAA_DOMAIN_SLOTS=_saa_domain_slots()
+
 def specs_for(state,n):
     specs=[]
     for ix in range(state['generated_index'],state['generated_index']+n):
-        d,t=a.TOPICS[ix%len(a.TOPICS)]
-        specs.append({'id':f'SAA-AUTO-{ix+1:05d}','domain':d,'topic':t,
+        domain=SAA_DOMAIN_SLOTS[ix%100]
+        per_cycle=SAA_DOMAIN_SLOTS[:ix%100+1].count(domain)-1
+        topic_list=SAA_BLUEPRINT[domain]
+        topic=topic_list[((ix//100)*SAA_WEIGHTS[domain]+per_cycle)%len(topic_list)]
+        specs.append({'id':f'SAA-AUTO-{ix+1:05d}','domain':domain,'topic':topic,
                       'type':'multiple' if ix%4==3 else 'single',
                       'difficulty':'上級' if ix%3==2 else '中級'})
     return specs
