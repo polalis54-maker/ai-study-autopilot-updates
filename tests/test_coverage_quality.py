@@ -11,7 +11,7 @@ parts=[]
 for node in tree.body:
     if isinstance(node,ast.Assign) and any(isinstance(t,ast.Name) and t.id in needed for t in node.targets):
         parts.append(node)
-    if isinstance(node,ast.FunctionDef) and node.name in {"_saa_domain_slots","specs_for","question_is_near_duplicate"}:
+    if isinstance(node,ast.FunctionDef) and node.name in {"_saa_domain_slots","_topic_usage","specs_for","question_is_near_duplicate"}:
         parts.append(node)
 ns={"difflib":difflib,"re":re}
 exec(compile(ast.Module(body=parts,type_ignores=[]),"<saa-scheduler-test>","exec"),ns)
@@ -21,6 +21,10 @@ specs=ns["specs_for"]({"generated_index":0},200)
 assert len(specs)==200 and len({s["id"] for s in specs})==200
 assert {d:sum(s["domain"]==d for s in specs) for d in ns["SAA_WEIGHTS"]}=={d:n*2 for d,n in ns["SAA_WEIGHTS"].items()}
 assert all(s["topic"] in ns["SAA_BLUEPRINT"][s["domain"]] for s in specs)
+# A topic already present in the corpus must lose priority to an uncovered topic.
+existing=[{"id":"old","domain":"D1","topic":ns["SAA_BLUEPRINT"]["D1"][0]}]
+planned=ns["specs_for"]({"generated_index":0},1,existing)
+assert planned[0]["topic"]!=existing[0]["topic"]
 f=ns["question_is_near_duplicate"]
 q={"id":"new","question":"ある企業はVPCのプライベートサブネットからKMSへ安全に接続する必要があります。最適な接続方法は何ですか。"}
 old={"id":"old","question":q["question"]}
