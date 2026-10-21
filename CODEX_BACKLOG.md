@@ -18,13 +18,22 @@ minimal user intervention, within existing authorizations.
 - **One real provider trial succeeded:** the owner reported `SAA-AUTO-00020`
   `REVIEWED_HOLD`, OpenAI revision + Gemini reassessment, **2 API requests**.
   The source question and learning bank remain unchanged.
-- **Real user-ready gains: 0 verified adopted questions.** The owner has not yet
-  supplied the text/choices/explanations of the revision for independent AWS
-  documentation verification; no operator attestation or local PWA sync was performed.
-- **Next bottleneck:** verify the first repaired question against actual official
-  AWS documentation, identify wrong distractors/claims, then execute a documented,
-  explicit human approval for exactly that candidate. Do not mark this complete
-  from Gemini PASS or GitHub CI. Do not ask the user to run unrelated commands.
+- **Real user-ready gains: 0 verified adopted questions.** The owner supplied the
+  full local revision comparison for SAA-AUTO-00020. Despite Gemini PASS, quality
+  review identified inaccurate claims that FIFO is unsuitable at high throughput
+  and insufficient distinction between SNS cross-region event fanout and native
+  replication of existing SQS messages. **Decision: REVISE, not approve.**
+  Do not hardcode the user's private question text in this public repository.
+- **Human feedback workflow implemented in code:** `revision-request-changes`
+  explicitly records a rejected Gemini PASS without API calls. `revision-retry`
+  can then use operator feedback for a new, quota-limited paid trial and preserves
+  prior revision history; requires local Windows update. Neither command was run
+  on the owner's PC yet. Release v0.5.10 is pending/subject to checking release status.
+- **Next bottleneck:** on the Windows runtime, mark SAA-AUTO-00020
+  `REVISION_REQUESTED` with the identified technical corrections; only then
+  attempt another paid revision when the daily cap and provider bill permit.
+  Recheck the new candidate and official AWS documentation before staging/approval.
+  Do not claim adoption from GitHub CI.
 - **No automatic 81-item paid repair:** daily quota near exhausted in last report;
   the per-request 5-JPY ledger is not a guaranteed real 1000-JPY bill limit.
 
