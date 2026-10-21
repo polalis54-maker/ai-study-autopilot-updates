@@ -152,7 +152,7 @@ def sync_study_pack(output_dir):
             for p in reversed(written):
                 temp=p.with_suffix(p.suffix+'.restore.tmp');temp.write_bytes(backups[p]);temp.replace(p)
             raise
-        return report('SYNCED',total=len(merged['questions']),newly_added=len(add),
+        return report('SYNCED',total=len(merged['questions']),newly_added=len(add),unverified_skipped=blocked,
                       ready_zip='AI_Study_公開用.zip',message='ローカルアプリのみ更新、Netlifyは未更新')
     except (ValueError,KeyError,TypeError,OSError,zipfile.BadZipFile) as exc:
         return report('FAILED',message=str(exc)[:250])
