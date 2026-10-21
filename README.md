@@ -73,6 +73,29 @@ No retry is automatic. A rejected trial cannot be treated as reviewed/approved.
 The request-count budget uses an estimated 5 JPY reservation per provider call
 and **does not guarantee** actual billed spend is under 1000 JPY.
 
+## Immediate offline practice for held candidates (no paid API)
+
+Generated questions with `QUALITY_HOLD` are **not** officially verified and are
+intentionally excluded from the scored, published PC/mobile question bank. To
+make the locally saved Gemini-PASS candidates available for **provisional**
+practice while independent review continues, run from the Windows installation:
+
+```powershell
+py -3 .\\live_progress.py practice-preview
+```
+
+This opens a standalone HTML practice room backed by
+`work/state.json`. It shows one or two selections, the model's **provisional**
+answer, and the full explanation for every candidate, with prominent warnings
+that the answer may be wrong. It omits every rejected or revised-trial question.
+It does not use APIs or change `AI_Study/questions.json`, learning history,
+trophies, approvals, or Netlify. The output file is local:
+`work/outputs/AI_Study_未検証練習室.html`.
+
+**Important:** This is not a claim that 14+ questions were added to the main
+study app. Actual availability depends on the user's local state, and
+all provisional answers require independent fact-checking.
+
 ## Developer tests
 
 ```sh

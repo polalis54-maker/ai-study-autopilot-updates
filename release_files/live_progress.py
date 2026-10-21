@@ -836,16 +836,156 @@ def install_trophy_ui(study:Path)->bool:
         raise
     return True
 
+
+# This is deliberately independent from the verified PC/mobile study bank.
+# A private, self-contained practice page may show AI-reviewed draft candidates
+# without claiming their answers are fact-checked or updating learning scores.
+PREVIEW_HTML=r'''<!doctype html>
+<html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'">
+<title>AI Study 未検証候補 練習室</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{font:16px/1.7 system-ui,-apple-system,sans-serif;background:#101726;color:#f0f3fa;margin:0;padding:24px}
+main{max-width:820px;margin:0 auto}.head{background:#26324a;border:1px solid #4b5a76;padding:22px;border-radius:16px}
+h1{font-size:1.5rem;margin:0 0 8px}.warning{color:#ffe1a1;font-weight:700}
+#quiz{margin-top:20px;padding:25px;background:#1b2638;border-radius:16px;border:1px solid #45516d}
+#question{white-space:pre-line;font-size:1.13rem;font-weight:650;margin:18px 0}
+.choice{display:block;width:100%;text-align:left;background:#2a3852;color:#f4f6fb;border:1px solid #5a6b86;border-radius:12px;padding:14px;margin:10px 0;cursor:pointer;font:inherit}
+.choice:focus-visible,button:focus-visible{outline:3px solid #ffd47d}.choice.selected{border:2px solid #ffc267;background:#38435c}
+button:disabled{opacity:.55;cursor:not-allowed}.bar{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
+.action{background:#ffe0a3;color:#161e2d;border:0;padding:12px 20px;border-radius:10px;font:inherit;font-weight:700;cursor:pointer}
+.action.secondary{background:#3d4e69;color:#fff}.result{margin-top:20px;border-top:1px solid #65738b;padding-top:14px}
+#explanation{white-space:pre-line}.subtle{color:#c1cbdb;font-size:.9rem}
+</style></head><body><main><div class="head"><h1>🎓 AI Study：未検証候補の練習室</h1>
+<p class="warning">⚠ AIレビュー済み・AWS公式資料未照合。正答・解説に誤りが含まれる可能性があります。</p>
+<p>ここは正式問題集とは別のローカル練習画面です。成績・トロフィー・元問題集を変更せず、ネットにも送信しません。</p>
+<p id="count" class="subtle"></p></div>
+<section id="quiz"><div id="progress" class="subtle"></div><div id="question"></div>
+<div id="choices"></div><div class="bar">
+<button id="grade" class="action">解答・解説を表示</button><button id="next" class="action secondary">次の問題 →</button></div>
+<div id="result" class="result" hidden><div id="correct"></div><p id="explanation"></p>
+<p class="warning">この解説は未検証です。疑問があればAWS公式資料で確認してください。</p></div></section>
+</main><script>
+const questions=__PAYLOAD__;
+let index=0;
+const selected=new Set();
+const el=id=>document.getElementById(id);
+el('count').textContent=questions.length+'問のAI品質保留候補（この画面の問題は正式採用数に含まれません）。';
+function show(){
+  const q=questions[index];selected.clear();
+  el('progress').textContent=(index+1)+' / '+questions.length+'問 • '+q.id+' • '+q.domain+' • '+(q.type==='multiple'?'2つ選択':'1つ選択');
+  el('question').textContent=q.question;
+  el('choices').replaceChildren();
+  Object.entries(q.choices).forEach(([letter,value])=>{
+    const b=document.createElement('button');b.className='choice';b.type='button';
+    b.textContent=letter+'. '+value;
+    b.onclick=()=>{
+      if(selected.has(letter))selected.delete(letter);
+      else if(q.type==='single'){selected.clear();selected.add(letter);}
+      else if(selected.size<2)selected.add(letter);
+      [...el('choices').children].forEach((child,i)=>child.classList.toggle('selected',selected.has(Object.keys(q.choices)[i])));
+    };
+    el('choices').append(b);
+  });
+  el('result').hidden=true;
+  el('next').disabled=index===questions.length-1;
+  el('grade').disabled=false;
+}
+el('grade').onclick=()=>{
+  const q=questions[index];
+  const picked=[...selected].sort().join(',')||'未選択';
+  const correct=q.correct.slice().sort().join(',');
+  el('correct').textContent='あなたの回答: '+picked+' / AI暫定正解: '+correct+(picked===correct?' （一致）':' （不一致）');
+  el('explanation').textContent=q.explanation;
+  el('result').hidden=false;
+};
+el('next').onclick=()=>{if(index<questions.length-1){index++;show();}};
+show();
+</script></body></html>'''
+
+
+def preview_candidates(state):
+    """Only Gemini-PASS quality-held candidates. No revision/rejects or secrets."""
+    generated=state.get('generated') or {}
+    trials=state.get('revision_trials') or {}
+    if not isinstance(generated,dict) or not isinstance(trials,dict):
+        raise ValueError('候補データの形式が不正')
+    ready=[]
+    for uid,record in sorted(generated.items()):
+        if (not isinstance(uid,str) or not uid.startswith('SAA-AUTO-')
+            or not isinstance(record,dict) or record.get('status')!='QUALITY_HOLD'
+            or uid in trials):
+            continue
+        q=record.get('candidate')
+        if not isinstance(q,dict) or q.get('id')!=uid or q.get('exam')!='SAA-C03':
+            continue
+        audit=record.get('audit') or []
+        reviews=[x.get('review') for x in audit
+                 if isinstance(x,dict) and isinstance(x.get('review'),dict)]
+        if not reviews or reviews[-1].get('verdict')!='PASS':
+            continue
+        typ=q.get('type')
+        if typ not in ('single','multiple'):
+            continue
+        letters='ABCDE' if typ=='multiple' else 'ABCD'
+        choices=q.get('choices')
+        if isinstance(choices,list) and len(choices)==len(letters):
+            choices=dict(zip(letters,choices))
+        if not isinstance(choices,dict) or set(choices)!=set(letters):
+            continue
+        correct=q.get('correct')
+        if (not isinstance(correct,list) or len(correct)!=(2 if typ=='multiple' else 1)
+            or len(set(correct))!=len(correct) or not set(correct)<=set(letters)):
+            continue
+        if (not isinstance(q.get('question'),str) or len(q['question'])<40
+            or not isinstance(q.get('explanation'),str) or len(q['explanation'])<75
+            or any(not isinstance(x,str) or not x.strip() for x in choices.values())):
+            continue
+        ready.append({key:q[key] for key in ('id','domain','type','question','explanation','correct')})
+        ready[-1]['choices']={k:choices[k] for k in letters}
+    return ready
+
+
+def preview_practice(root=None, *, open_page=False):
+    """Generate a private, zero-cost offline quiz view; never touch the PWA."""
+    root=Path(root) if root is not None else Path(__file__).resolve().parent
+    statepath=root/'work'/'state.json'
+    if not statepath.is_file():
+        print('[PREVIEW] 状態ファイルがありません。変更なし。')
+        return {'status':'NO_STATE','count':0}
+    state=json.loads(statepath.read_text(encoding='utf-8-sig'))
+    candidates=preview_candidates(state)
+    if not candidates:
+        print('[PREVIEW] 対象のQUALITY_HOLD候補はありません。変更なし。')
+        return {'status':'NO_CANDIDATES','count':0}
+    # Escape closing SCRIPT tags and HTML syntax in untrusted model text.
+    payload=json.dumps(candidates,ensure_ascii=False,separators=(',',':'))
+    payload=payload.replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
+    payload=payload.replace('\u2028','\\u2028').replace('\u2029','\\u2029')
+    page=PREVIEW_HTML.replace('__PAYLOAD__',payload)
+    dest=root/'work'/'outputs'/'AI_Study_未検証練習室.html'
+    dest.parent.mkdir(parents=True,exist_ok=True)
+    tmp=dest.with_suffix('.tmp')
+    tmp.write_text(page,encoding='utf-8')
+    tmp.replace(dest)
+    print('[PREVIEW] 練習用',len(candidates),'問を作成:',dest)
+    print('[PREVIEW] 公式未検証・正式問題集には未追加。API利用なし。')
+    if open_page:
+        import webbrowser
+        webbrowser.open(dest.resolve().as_uri())
+    return {'status':'CREATED','count':len(candidates),'path':str(dest)}
+
 if __name__=='__main__':
     cmd=sys.argv[1:] if len(sys.argv)>1 else []
     try:
-        if cmd==['setup-mobile']:setup_mobile_sync()
+        if cmd==['practice-preview']:preview_practice(open_page=True)
+        elif cmd==['setup-mobile']:setup_mobile_sync()
         elif cmd==['deploy-mobile']:publish_mobile(force=True)
         elif cmd==['status-mobile']:
             _,_,out=mobile_paths()
             p=out/'mobile_publish_status.json'
             print(p.read_text(encoding='utf-8') if p.exists() else 'No mobile deployment yet')
-        else:print('Usage: py -3 live_progress.py setup-mobile|deploy-mobile|status-mobile')
+        else:print('Usage: py -3 live_progress.py practice-preview|setup-mobile|deploy-mobile|status-mobile')
     except Exception as exc:
         print('[MOBILE] ERROR:',str(exc)[:210])
         sys.exit(1)

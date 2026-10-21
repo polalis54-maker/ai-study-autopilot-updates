@@ -74,6 +74,8 @@ jobs:
         run: python3 tests/test_revision_approval.py
       - name: Verify human QA can override AI PASS and preserve rejected revisions
         run: python3 tests/test_revision_feedback.py
+      - name: Check offline Gemini quality-hold practice preview safety
+        run: python3 tests/test_practice_preview.py
       - name: Package and checksum permitted files
         id: package
         shell: bash
