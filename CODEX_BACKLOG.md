@@ -4,6 +4,14 @@
 > user's Windows machine. No real API calls may be fabricated, and no task is scheduled
 > merely by committing these instructions.
 
+## Active P0 handoff: 500 newly playable questions (2026-10-22)
+
+**Read [CODEX_500_QUESTION_HANDOFF.md](CODEX_500_QUESTION_HANDOFF.md) and work its milestones as the highest priority.** The owner confirmed their Windows PC remains powered on and that the goal is unattended night-time generation, independent AI review and next-day practice. Approximately **500 additional unique playable new SAA-C03 questions** is the cumulative goal. It is **not** a request to manually draft ten questions, not a total of 500 API attempts, and not permission to spend more money.
+
+The owner actually installed v0.5.12 and showed 14 real new daily-practice items. Their dashboard then showed 256 stored generator records, 22 quality-held, 190/200 AI PASS progress, 22/25 requests, one malformed candidate and Netlify ERROR. These are **dated local observations**, not live GitHub stats or 256 usable questions. The old goal `GOAL_TOTAL=200`, cutoff Oct 28, and campaign request/budget caps obstruct scaling.
+
+**No extra paid API usage has been approved** beyond the existing finite 1000 JPY proxy / 150 reserved request constraints. A goal of 500 new practice items **must be bounded by explicit future consent**, and the system must report budget-exhausted rather than fabricate success. Keep public repo data separated from the user's private local PWA and Windows work dir. Deliver tested PRs and real usable results.
+
 ## Success criteria
 
 The user wants to **solve AWS SAA-C03 practice questions and complain about quality**.

@@ -12,7 +12,19 @@ Codex's job is to implement fixes, run tests, and produce reviewed, working pull
 Prioritize **quality over number of generated questions**. A Gemini PASS is *not* AWS source
 verification and **must not automatically approve content**.
 
-## Current facts (2026-10-21)
+## Current priority update (2026-10-22)
+
+Read `CODEX_500_QUESTION_HANDOFF.md` first for the current owner request:
+**500 additional, distinct playable SAA-C03 questions**, generated/reviewed by a
+Windows PC left on overnight, and ready for the next day's study. Existing
+v0.5.12 Windows update/autorun and 14 provisional daily new questions were
+confirmed by the owner, but the 500-question pipeline does not exist yet.
+The priority is real playable new content, not version bumps or a series of
+one-item repair demonstrations. The spending limit is unchanged; 500 new
+questions is **not** an authorization to spend more than the prior 1000 JPY
+campaign. Do not move quality-held content to the official verified bank.
+
+## Current facts (2026-10-21) (historical; superseded by current update above)
 
 - Released version on main: v0.5.6 (check `release_files/VERSION.json` again).
 - Last user-reported local counts: 150 `AI_PASS`, 81 `REVISE_UNRESOLVED`,
