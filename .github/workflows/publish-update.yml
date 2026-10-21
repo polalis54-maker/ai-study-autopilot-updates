@@ -70,6 +70,8 @@ jobs:
         run: python3 tests/test_verified_study_sync.py
       - name: Verify only explicitly approved revised questions enter PC study pack
         run: python3 tests/test_revision_staging.py
+      - name: Verify explicit human attestation before app sync
+        run: python3 tests/test_revision_approval.py
       - name: Package and checksum permitted files
         id: package
         shell: bash
