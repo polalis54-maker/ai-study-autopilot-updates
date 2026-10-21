@@ -36,7 +36,7 @@ declarations = [node for node in tree.body if isinstance(node,ast.Assign)
                 and any(isinstance(t,ast.Name) and t.id in ("FIELDS","SCHEMA")
                         for t in node.targets)]
 subset=declarations+[functions[x] for x in
-    ("daily_call_cap","used_today","fix_retry_due","structured_batch_call","salvage_batch")]
+    ("daily_call_cap","history_calls_today","used_today","fix_retry_due","structured_batch_call","salvage_batch")]
 module=ast.fix_missing_locations(ast.Module(body=subset,type_ignores=[]))
 exec(compile(module,str(p),"exec"),scope)
 

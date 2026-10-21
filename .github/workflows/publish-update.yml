@@ -54,6 +54,14 @@ jobs:
         run: python3 tests/test_mobile.py
       - name: Test 30 trophies, lossless PWA patch, and browser JavaScript syntax
         run: python3 tests/test_trophies.py
+      - name: Verify cumulative API campaign and crash-safe reservations
+        run: python3 tests/test_campaign_budget.py
+      - name: Verify repair queue and one-problem behavior without API calls
+        run: python3 tests/test_revision_pipeline.py
+      - name: Verify OpenAI protocol with mocked HTTP
+        run: python3 tests/test_revision_http.py
+      - name: Verify three-item repair batching and safe resume
+        run: python3 tests/test_revision_batch.py
       - name: Package and checksum permitted files
         id: package
         shell: bash
