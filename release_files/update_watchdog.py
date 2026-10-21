@@ -35,11 +35,13 @@ CALL_CAP=25
 ONE_TIME_EXTRA_DATE='2026-10-18'
 ONE_TIME_EXTRA_LIMIT=50
 # Campaign accounting uses conservative per-request reservations, NOT actual billing.
-# Hard limit is 20 API calls across all runs after activation. Each call reserves
-# JPY 50, leaving a JPY 1000 proxy cap. Actual provider charges can differ.
+# Conservative proxy budget based on user's OpenAI-only history ($0.46/191 calls),
+# but includes a large cushion for Gemini and longer prompts. Not actual billing.
+# A separate absolute request cap prevents runaway cost.
 CAMPAIGN_BUDGET_JPY=1000
-CAMPAIGN_RESERVE_JPY_PER_CALL=50
-CAMPAIGN_MAX_CALLS=CAMPAIGN_BUDGET_JPY//CAMPAIGN_RESERVE_JPY_PER_CALL
+CAMPAIGN_RESERVE_JPY_PER_CALL=5
+CAMPAIGN_ABSOLUTE_CALL_CAP=150
+CAMPAIGN_MAX_CALLS=min(CAMPAIGN_ABSOLUTE_CALL_CAP,CAMPAIGN_BUDGET_JPY//CAMPAIGN_RESERVE_JPY_PER_CALL)
 
 
 def campaign_budget_remaining(state):
@@ -420,7 +422,7 @@ def run_fast(*,demo=False,force=False,generate_only=False):
     if not demo and not state.get('campaign_budget_1000jpy_enabled',False):
         print('集中生成は予算台帳の明示的有効化待ち。API呼び出しなし');return 0
     if not demo and campaign_budget_remaining(state)<=0:
-        print('集中生成の予算代理上限20回に到達。API呼び出しなし');return 0
+        print('集中生成の予算代理上限に到達。API呼び出しなし');return 0
     if not demo and state['last_attempt']==a.today() and not force:
         print('今日は既に実行済み。API呼び出しなし');return 0
     remaining=daily_call_cap() if demo else max(0,daily_call_cap()-used_today(state))
