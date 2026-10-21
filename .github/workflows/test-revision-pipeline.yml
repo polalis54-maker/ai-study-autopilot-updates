@@ -1,7 +1,7 @@
 name: Revision pipeline verification
 on:
   push:
-    branches: [fix/verified-only-study-sync]
+    branches: [feature/staged-approved-revisions]
   workflow_dispatch:
 permissions:
   contents: read
@@ -21,5 +21,6 @@ jobs:
       - run: python3 tests/test_campaign.py
       - run: python3 tests/test_mobile.py
       - run: python3 tests/test_verified_study_sync.py
+      - run: python3 tests/test_revision_staging.py
       - run: python3 tests/test_trophies.py
       - run: python3 tests/test_campaign_budget.py
