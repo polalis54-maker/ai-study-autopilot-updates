@@ -841,6 +841,60 @@ def revision_status():
     return 0
 
 
+# Only printed on the operator's PC, never sent to GitHub, a provider, or a file.
+REVISION_REVIEW_FIELDS=('id','exam','domain','topic','type','difficulty',
+                        'question','choices','correct','explanation')
+
+
+def revision_comparison(state, qid):
+    """Return only one original and its separately staged trial for human review."""
+    if not isinstance(qid,str) or not re.fullmatch(r'SAA-AUTO-[0-9]{5}',qid):
+        raise ValueError('問題IDの形式が不正です')
+    record=(state.get('generated') or {}).get(qid)
+    trial=(state.get('revision_trials') or {}).get(qid)
+    if not isinstance(record,dict) or not isinstance(trial,dict):
+        raise ValueError('該当IDの原問題または修正試行が見つかりません')
+    original=record.get('candidate')
+    changed=trial.get('candidate')
+    if not isinstance(original,dict):
+        raise ValueError('原問題のデータが不正です')
+    # An error trial has no revised candidate. Do not pretend it passed.
+    if changed is not None and not isinstance(changed,dict):
+        raise ValueError('改稿データの形式が不正です')
+    def safe(q):
+        return {name:q[name] for name in REVISION_REVIEW_FIELDS if name in q}
+    audits=record.get('audit') or []
+    last_review=next((entry['review'] for entry in reversed(audits)
+                      if isinstance(entry,dict) and isinstance(entry.get('review'),dict)),{})
+    review=trial.get('review')
+    if not isinstance(review,dict):review={}
+    return {'id':qid,'original_status':record.get('status'),
+            'revision_status':trial.get('status'),
+            'original':safe(original),
+            'revision':safe(changed) if changed is not None else None,
+            'original_review_issues':last_review.get('issues') or [],
+            'revision_review':{
+                'verdict':review.get('verdict'),
+                'issues':review.get('issues') or [],
+                'notes':review.get('notes',''),
+                'exam_quality':review.get('exam_quality',{})},
+            'official_documentation_verified':False,
+            'human_approved':False,
+            'warning':'AI審査のみ。AWS公式資料との照合・人手の確認は未実施。問題集には未採用。'}
+
+
+def revision_compare(qid):
+    """Read-only local console comparison; may contain full question and answer."""
+    state=a.jread(a.STATEFILE,a.state_default())
+    try:
+        info=revision_comparison(state,qid)
+    except ValueError as exc:
+        print(str(exc))
+        return 2
+    print(json.dumps(info,ensure_ascii=False,indent=2))
+    return 0
+
+
 def validated_revision_candidate(response, original):
     """Validate one structured repair and restore trusted source metadata."""
     questions=response.get('questions') if isinstance(response,dict) else None
@@ -975,6 +1029,8 @@ def revision_batch():
 
 
 if __name__=='__main__':
+    if len(sys.argv)==3 and sys.argv[1]=='revision-compare':
+        sys.exit(revision_compare(sys.argv[2]))
     if sys.argv[1:]==['revision-status']:
         sys.exit(revision_status())
     if sys.argv[1:]==['revision-batch']:
