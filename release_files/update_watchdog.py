@@ -34,6 +34,34 @@ REV_DAILY=5
 CALL_CAP=25
 ONE_TIME_EXTRA_DATE='2026-10-18'
 ONE_TIME_EXTRA_LIMIT=50
+# Campaign accounting uses conservative per-request reservations, NOT actual billing.
+# Conservative proxy budget based on user's OpenAI-only history ($0.46/191 calls),
+# but includes a large cushion for Gemini and longer prompts. Not actual billing.
+# A separate absolute request cap prevents runaway cost.
+CAMPAIGN_BUDGET_JPY=1000
+CAMPAIGN_RESERVE_JPY_PER_CALL=5
+CAMPAIGN_ABSOLUTE_CALL_CAP=150
+CAMPAIGN_MAX_CALLS=min(CAMPAIGN_ABSOLUTE_CALL_CAP,CAMPAIGN_BUDGET_JPY//CAMPAIGN_RESERVE_JPY_PER_CALL)
+
+
+def campaign_budget_remaining(state):
+    ledger=state.get('campaign_budget_1000jpy') or {}
+    used=ledger.get('reserved_calls',0)
+    if type(used) is not int or used<0:
+        raise ValueError('予算台帳が不正')
+    return max(0,CAMPAIGN_MAX_CALLS-used)
+
+
+def reserve_campaign_api_request(state):
+    """Reserve BEFORE sending each request. Persists across crashes and restarts."""
+    if campaign_budget_remaining(state)<=0:
+        raise RuntimeError('集中生成の予算代理上限に到達したため追加API呼び出し停止')
+    ledger=state.setdefault('campaign_budget_1000jpy',{'reserved_calls':0})
+    ledger['reserved_calls']+=1
+    ledger['estimated_reserved_jpy']=ledger['reserved_calls']*CAMPAIGN_RESERVE_JPY_PER_CALL
+    ledger['warning']='推定用の予約額。API事業者の実請求額ではない'
+    a.jwrite(a.STATEFILE,state)
+
 
 def daily_call_cap(day=None):
     # Temporary consent: 2026-10-18 only. All other dates stay at 25.
@@ -391,6 +419,10 @@ def run_fast(*,demo=False,force=False,generate_only=False):
     if goal_progress(state)>=GOAL_TOTAL:
         print('目標到達: Gemini PASSを含む全200問に到達。追加API利用なし。',flush=True)
         return 0
+    if not demo and not state.get('campaign_budget_1000jpy_enabled',False):
+        print('集中生成は予算台帳の明示的有効化待ち。API呼び出しなし');return 0
+    if not demo and campaign_budget_remaining(state)<=0:
+        print('集中生成の予算代理上限に到達。API呼び出しなし');return 0
     if not demo and state['last_attempt']==a.today() and not force:
         print('今日は既に実行済み。API呼び出しなし');return 0
     remaining=daily_call_cap() if demo else max(0,daily_call_cap()-used_today(state))
@@ -401,6 +433,14 @@ def run_fast(*,demo=False,force=False,generate_only=False):
         state['last_attempt']=a.today()
         a.jwrite(a.STATEFILE,state)
     api=API(*keys,limit=remaining,demo=demo)
+    if not demo:
+        original_call=api.call
+        def budgeted_call(provider,prompt,payload):
+            reserve_campaign_api_request(state)
+            return original_call(provider,prompt,payload)
+        api.call=budgeted_call
+        api.limit=min(api.limit,api.calls+campaign_budget_remaining(state))
+
     log=[];errors=[];reviewed=0;generated=0
     before_pass=count_approved(state)
     def checkpoint():
