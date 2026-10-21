@@ -969,6 +969,8 @@ def revision_batch():
     for uid,status in processed:
         print(' ',uid,status)
     print('改稿はすべて別管理。元データは未変更、正式採用も未実施。')
+    if any(status=='REVISION_ERROR' for _,status in processed):
+        return 1  # Explicit failure exit for provider/schema errors.
     return 0 if processed or not revision_queue(a.jread(a.STATEFILE,a.state_default())) else 2
 
 
