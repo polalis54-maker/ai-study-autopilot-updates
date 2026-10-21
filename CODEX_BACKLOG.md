@@ -14,6 +14,25 @@ The owner actually installed v0.5.12 and showed 14 real new daily-practice items
 
 ## Success criteria
 
+### Issue #13 implementation under review (2026-10-22)
+
+The opt-in controller in `update_watchdog.py` and journaled provisional delivery
+in `live_progress.py` now target 100/day and 500 additional deliveries. See
+`NIGHT_SUPPLY.md` for the exact private setup, unchanged caps, replay behavior,
+heuristic duplicate/quality limits and outstanding real-machine verification.
+`tests/test_supply_campaign.py` exercises the real controller with fake providers:
+500 distinct deliveries across five dates; baseline 256/22/14 preserved; 100
+reserved requests; generator/reviewer/deck/in-flight crashes; budget and billing
+stops; malformed replies and finite transport retries. Existing regression suite
+is retained. These are synthetic tests, not real delivered AWS questions.
+
+Still outstanding: actual Windows deployment/provider throughput and billing,
+AWS factual evaluation, durable per-question learner feedback/weak-area scoring,
+actual provider-token/currency reconciliation (only existing request reservations
+are available here), complete semantic duplicate evaluation, private PWA adapter
+and Netlify ERROR investigation. This implementation must not be reported as
+100 actual improved questions or a completed real-machine overnight campaign.
+
 The user wants to **solve AWS SAA-C03 practice questions and complain about quality**.
 Agent-led coding, regression tests, maintenance, and repeatable delivery should require
 minimal user intervention, within existing authorizations.

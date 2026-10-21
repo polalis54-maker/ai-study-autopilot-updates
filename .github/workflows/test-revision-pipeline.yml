@@ -1,7 +1,8 @@
 name: Revision pipeline verification
 on:
+  pull_request:
   push:
-    branches: [feature/unattended-daily-practice]
+    branches: [feature/unattended-daily-practice, feature/issue-13-night-supply]
   workflow_dispatch:
 permissions:
   contents: read
@@ -26,5 +27,6 @@ jobs:
       - run: python3 tests/test_revision_feedback.py
       - run: python3 tests/test_practice_preview.py
       - run: python3 tests/test_daily_practice.py
+      - run: python3 tests/test_supply_campaign.py
       - run: python3 tests/test_trophies.py
       - run: python3 tests/test_campaign_budget.py

@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+work/
+AI_Study/
+.env
+.env.*
+dist/
