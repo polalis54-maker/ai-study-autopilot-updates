@@ -61,7 +61,7 @@ def is_independently_approved(question, approvals):
         return False
     source=entry.get('documentation_url')
     if not isinstance(source,str) or not re.fullmatch(
-            r'https://docs\\.aws\\.amazon\\.com/[A-Za-z0-9/_\\-.%#?=&]+',source):
+            r'https://docs[.]aws[.]amazon[.]com/[A-Za-z0-9/_.%#?=&-]+',source):
         return False
     return entry.get('question_sha256')==review_payload_digest(question)
 
