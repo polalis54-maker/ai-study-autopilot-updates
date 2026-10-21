@@ -76,6 +76,8 @@ jobs:
         run: python3 tests/test_revision_feedback.py
       - name: Check offline Gemini quality-hold practice preview safety
         run: python3 tests/test_practice_preview.py
+      - name: Verify daily independent provisional study set generation
+        run: python3 tests/test_daily_practice.py
       - name: Package and checksum permitted files
         id: package
         shell: bash

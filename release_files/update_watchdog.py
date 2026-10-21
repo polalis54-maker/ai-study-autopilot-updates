@@ -23,7 +23,7 @@ GENERATION_MODEL='gpt-4.1-mini'
 # Count goal as 55 existing questions plus Gemini-approved new candidates.
 # Existing questions are NOT automatically AWS-official-verified.
 GOAL_TOTAL=200
-GEN_DAILY=4
+GEN_DAILY=20  # upper target per unattended run; API calls still limited to 25/day and 150/campaign
 CAMPAIGN_START='2026-10-19'
 CAMPAIGN_DAILY_CAP=25
 # Optional repairs stay disabled until HTTP 400 is diagnosed.
@@ -387,7 +387,7 @@ def campaign_due(state):
         return False
     if state.get('campaign_paused_date')==day:
         return False
-    if daily_call_cap()-used_today(state)<4:
+    if daily_call_cap()-used_today(state)<4 or campaign_budget_remaining(state)<4:
         return False
     # Do not launch another batch until this day's prior run is fully committed.
     return bool(state.get('last_attempt')==day and
@@ -625,6 +625,17 @@ def run_fast(*,demo=False,force=False,generate_only=False):
         state['history']=state['history'][-1200:]
         checkpoint();a.build_pack(state);a.produce_report(state)
         a.jwrite(a.OUT/'last_result.json',state['history'][-1])
+        # A user needs a playable set after sleeping, not just generated state.
+        # This is a private, explicitly unverified practice page, not main PWA
+        # publication. Zero API calls and no question/history modifications.
+        try:
+            import live_progress as lp
+            delivered=lp.prepare_daily_practice(ROOT)
+            print('[FAST][DAILY] 朝の練習新問:',delivered.get('new_questions',0),
+                  '問 / 状態:',delivered.get('status'),flush=True)
+        except (ValueError,TypeError,KeyError,OSError) as exc:
+            print('[FAST][DAILY][ERROR] 練習ページ生成エラー:',
+                  str(exc)[:180],flush=True)
     progress('ERROR' if errors else 'COMPLETE','高速処理終了',errors[0] if errors else f'既存{reviewed}件・新規{generated}件')
     print(f'処理結果: 既存レビュー{reviewed}問・新規審査{generated}問・未審査{len(state["pending"])}問 / 目標 {goal_progress(state)}/{GOAL_TOTAL}問（Gemini PASS+既存）',flush=True)
     print(f'API {api.calls}/{remaining}回（本日累計{used_today(state)}/{daily_call_cap()}回）',flush=True)
@@ -662,6 +673,11 @@ def write_runtime_status(status, detail='', child_pid=None):
           isinstance(x,dict) and x.get('status')=='AI_PASS' for x in reviewed.values()),
       'generated_count':len(generated),'generated_pass':sum(
           isinstance(x,dict) and x.get('status')=='AI_PASS' for x in generated.values()),
+      'generated_provisional':sum(
+          isinstance(x,dict) and x.get('status')=='QUALITY_HOLD' for x in generated.values()),
+      'morning_new':_read_obj(ROOT/'work'/'outputs'/'daily_practice_status.json').get('new_questions','未作成'),
+      'morning_date':_read_obj(ROOT/'work'/'outputs'/'daily_practice_status.json').get('date','未作成'),
+      'auto_stop_requested':STOP.exists(),
       'pending_count':len(state.get('pending') or {}),
       'goal_total':GOAL_TOTAL,'goal_progress':goal_progress(state),
       'goal_remaining':max(0,GOAL_TOTAL-goal_progress(state)),
@@ -688,7 +704,7 @@ def write_runtime_status(status, detail='', child_pid=None):
     color='#57d6a5' if status=='WAITING' else ('#ffd078' if status in ('RUNNING','STARTING') else '#f09eab')
     latest=esc(data['last_phase'] or detail)
     err=esc(' / '.join(map(str,errors[:2])) if errors else 'なし')
-    page=f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="8"><title>AI Study 稼働状況</title><style>body{{background:#101827;color:#f5f7fc;font:16px/1.7 system-ui,sans-serif;max-width:820px;margin:32px auto;padding:0 16px}}main{{background:#1c2840;border:1px solid #3e5375;border-radius:18px;padding:24px}}h2{{color:{color}}}small{{color:#aab8d0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.cards>div{{background:#111c31;padding:15px;border-radius:12px;flex:1;min-width:130px}}strong{{display:block;font-size:1.4rem}}#signal{{font-weight:bold}}</style></head><body><h1>🎓 AI Study Autopilot</h1><main><small>v{esc(data['version'])}</small><h2>{esc(label)}</h2><p>{latest}</p><div class="cards"><div>既存レビュー<strong>{data['reviewed_count']} / 55</strong></div><div>新規保存<strong>{data['generated_count']}問</strong></div><div>新規 Gemini PASS<strong>{data['generated_pass']}問</strong></div></div><p><strong>Gemini PASS 合計: {data['goal_progress']} / {data['goal_total']} 問</strong></p><p>目標まで残り {data['goal_remaining']} 問。新規 Gemini PASS {data['generated_pass']} 問</p><p>本日のAPI利用: {data['today_calls']} / {data['today_cap']} 回 (残り {data['today_remaining']} 回)</p><p>次回: {esc(data['next_run'])}</p><p>PC内の問題同期: {esc(data['sync_status'])}</p><p><strong>スマホ版(Netlify): {esc(data['mobile_status'])}</strong> / 公開問題数: {esc(data['mobile_questions'])}</p><p>直近のエラー: {err}</p><small>生存信号: {esc(data['timestamp'])} / PID {data['watchdog_pid']}</small><p id="signal">生存信号を確認中…</p></main><p><small>8秒ごとに更新。2分間更新がなければ停止・フリーズの疑い。AI PASSはAWS公式確認済みではありません。</small></p><script>const t={int(data['unix_time']*1000)};function check(){{const elapsed=Math.max(0,Date.now()-t),el=document.getElementById('signal');el.textContent=elapsed>120000?'⚠ 生存信号が2分以上更新されていません':('● 生存信号あり '+Math.floor(elapsed/1000)+'秒前');el.style.color=elapsed>120000?'#ffab83':'#57d6a5';}}check();setInterval(check,4000)</script></body></html>'''
+    page=f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="8"><title>AI Study 稼働状況</title><style>body{{background:#101827;color:#f5f7fc;font:16px/1.7 system-ui,sans-serif;max-width:820px;margin:32px auto;padding:0 16px}}main{{background:#1c2840;border:1px solid #3e5375;border-radius:18px;padding:24px}}h2{{color:{color}}}small{{color:#aab8d0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.cards>div{{background:#111c31;padding:15px;border-radius:12px;flex:1;min-width:130px}}strong{{display:block;font-size:1.4rem}}#signal{{font-weight:bold}}</style></head><body><h1>🎓 AI Study Autopilot</h1><main><small>v{esc(data['version'])}</small><h2>{esc(label)}</h2><p>{latest}</p><div class="cards"><div>既存レビュー<strong>{data['reviewed_count']} / 55</strong></div><div>新規保存<strong>{data['generated_count']}問</strong></div><div>新規AI審査保留<strong>{data['generated_provisional']}問</strong></div><div>本日の新問<strong>{data['morning_new']}問</strong></div></div><p><strong>Gemini PASS 合計: {data['goal_progress']} / {data['goal_total']} 問</strong></p><p>目標まで残り {data['goal_remaining']} 問。新規 Gemini PASS {data['generated_pass']} 問</p><p>本日のAPI利用: {data['today_calls']} / {data['today_cap']} 回 (残り {data['today_remaining']} 回)</p><p>次回: {esc(data['next_run'])}</p><p>PC内の問題同期: {esc(data['sync_status'])}</p><p><strong>スマホ版(Netlify): {esc(data['mobile_status'])}</strong> / 公開問題数: {esc(data['mobile_questions'])}</p><p>直近のエラー: {err}</p><small>生存信号: {esc(data['timestamp'])} / PID {data['watchdog_pid']}</small><p id="signal">生存信号を確認中…</p></main><p><small>8秒ごとに更新。2分間更新がなければ停止・フリーズの疑い。新問は未検証の別練習画面です。AI PASSはAWS公式確認済みではありません。</small></p><script>const t={int(data['unix_time']*1000)};function check(){{const elapsed=Math.max(0,Date.now()-t),el=document.getElementById('signal');el.textContent=elapsed>120000?'⚠ 生存信号が2分以上更新されていません':('● 生存信号あり '+Math.floor(elapsed/1000)+'秒前');el.style.color=elapsed>120000?'#ffab83':'#57d6a5';}}check();setInterval(check,4000)</script></body></html>'''
     tmp=DASHBOARD.with_suffix('.html.tmp')
     tmp.write_text(page,encoding='utf-8')
     tmp.replace(DASHBOARD)

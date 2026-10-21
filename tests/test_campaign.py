@@ -7,11 +7,11 @@ source=Path('release_files/update_watchdog.py').read_text(encoding='utf-8')
 tree=ast.parse(source)
 functions={x.name:x for x in tree.body if isinstance(x,ast.FunctionDef)}
 wanted=['daily_call_cap','count_approved','existing_approved','goal_progress',
-        'history_calls_today','used_today','campaign_due']
+        'history_calls_today','used_today','campaign_budget_remaining','campaign_due']
 for n in wanted:
     assert n in functions,n
 scope={'CAMPAIGN_START':'2026-10-19','CUTOFF':'2026-10-28',
-       'GOAL_TOTAL':200,'CAMPAIGN_DAILY_CAP':25,
+       'GOAL_TOTAL':200,'CAMPAIGN_DAILY_CAP':25,'CAMPAIGN_MAX_CALLS':150,
        'CALL_CAP':25,'ONE_TIME_EXTRA_DATE':'2026-10-18','ONE_TIME_EXTRA_LIMIT':50}
 day=['2026-10-19']
 scope['a']=SimpleNamespace(today=lambda:day[0])
@@ -33,6 +33,10 @@ assert scope['goal_progress'](s)==2, 'Never count unresolved or unreviewed'
 assert scope['used_today'](s)==23
 assert "state['history']=state['history'][-1200:]" in source, 'Daily cap must retain enough call history'
 assert not scope['campaign_due'](s),'Only two requests remain, insufficient for an extra batch'
+s['campaign_budget_1000jpy']={'reserved_calls':148}
+assert not scope['campaign_due'](s),'Never launch empty batches after campaign limit'
+s.pop('campaign_budget_1000jpy')
+
 s['history'].append({'date':'2026-10-19','calls':275,'errors':[]})
 assert not scope['campaign_due'](s),'Only 2 requests remain'
 s['history'][-1]['calls']=250
@@ -50,7 +54,7 @@ assert not scope['campaign_due'](s),'Never spend after exam preparation deadline
 day[0]='2026-10-18'
 assert not scope['campaign_due'](s),'Campaign must not retroactively spend prior date'
 
-assert 'GEN_DAILY=4' in source, 'Do not silently cap at twenty attempts'
+assert 'GEN_DAILY=20' in source, 'Generate enough candidates per unattended day, within unchanged API caps'
 assert "and goal_progress(state)<GOAL_TOTAL" in source, 'Stop at goal in-batch'
 assert "'campaign_paused_date'" in source
 assert 'campaign_due(_read_obj(ROOT/' in source
