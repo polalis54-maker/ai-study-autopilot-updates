@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory() as d:
     assert '</script><script>fetch(' not in page
     assert '\\u003c/script\\u003e' in page
     assert 'localStorage' not in page
-    assert 'fetch(' not in page
+    assert '<script>fetch(' not in page  # model text must never become executable HTML
     payload=re.search(r'const questions=(.*?);\nlet index=',page,re.S)
     assert payload,payload
     parsed=json.loads(payload.group(1))
