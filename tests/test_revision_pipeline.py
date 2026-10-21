@@ -123,6 +123,9 @@ def scenario(*, enabled=True,busy=False,available=150,daily=25,
 
 ns, state=scenario()
 assert len(ns['revision_queue'](state))==1
+notes_state=copy.deepcopy(state)
+notes_state['generated']['SAA-AUTO-00001']['audit']=[{'review':{'issues':[], 'notes':'review notes only'}}]
+assert ns['revision_queue'](notes_state)[0]['issues']==['review notes only']
 original_snapshot=copy.deepcopy(state['generated'])
 assert ns['revision_one']()==0
 assert state['generated']==original_snapshot, 'the bank must never change'
@@ -142,6 +145,8 @@ assert FakeLock.taken==FakeLock.released==1
 ns, state=scenario(change_domain=True)
 assert ns['revision_one']()==1
 assert state['revision_trials']['SAA-AUTO-00001']['status']=='REVISION_ERROR'
+assert state['history'][-1]['errors']==[], 'repair errors must not trigger batch retry'
+assert state['history'][-1]['revision_error']
 assert FakeAPI.requests==['openai']
 assert state['generated']['SAA-AUTO-00001']['candidate']==ORIGINAL
 
