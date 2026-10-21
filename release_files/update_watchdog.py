@@ -791,6 +791,56 @@ def revision_preview():
     return 0
 
 
+def revision_summary(state):
+    """Pure, read-only picture of the backlog, not an approval count."""
+    queue=revision_queue(state)
+    trials=state.get('revision_trials') or {}
+    if not isinstance(trials,dict):
+        raise ValueError('修正試行の記録形式が不正')
+    results={kind:0 for kind in
+             ('REVIEWED_HOLD','REVISION_REQUIRED','REVISION_ERROR','OTHER')}
+    by_domain={name:{'waiting':0,'attempted':0,'no_review_issues':0}
+               for name in ('D1','D2','D3','D4','OTHER')}
+    waiting=[]
+    for q in queue:
+        domain=q['domain'] if q['domain'] in by_domain else 'OTHER'
+        if q['id'] in trials:
+            by_domain[domain]['attempted']+=1
+            outcome=trials[q['id']].get('status','OTHER') if isinstance(trials[q['id']],dict) else 'OTHER'
+            results[outcome if outcome in results else 'OTHER']+=1
+        elif q['issues']:
+            by_domain[domain]['waiting']+=1
+            waiting.append(q['id'])
+        else:
+            by_domain[domain]['no_review_issues']+=1
+    # Avoid exposing questions, answers, API keys or review text in reports.
+    return {
+        'unresolved_total':len(queue),
+        'ready_for_first_revision':len(waiting),
+        'already_attempted':sum(results.values()),
+        'missing_review_issues':sum(v['no_review_issues'] for v in by_domain.values()),
+        'attempt_outcomes':results,
+        'by_domain':by_domain,
+        'next_ids':waiting[:10],
+        'quality_hold_originals':sum(
+            isinstance(v,dict) and v.get('status')=='QUALITY_HOLD'
+            for v in (state.get('generated') or {}).values()),
+        'campaign_reserved_calls':(state.get('campaign_budget_1000jpy') or {}).get('reserved_calls',0),
+        'campaign_remaining_calls':campaign_budget_remaining(state),
+        'today_used_calls':used_today(state),
+        'today_remaining_calls':max(0,daily_call_cap()-used_today(state)),
+        'original_questions_modified':False,
+        'auto_approval_enabled':False
+    }
+
+
+def revision_status():
+    """Read-only status for operators; no API requests, no writes."""
+    state=a.jread(a.STATEFILE,a.state_default())
+    print(json.dumps(revision_summary(state),ensure_ascii=False,indent=2))
+    return 0
+
+
 def validated_revision_candidate(response, original):
     """Validate one structured repair and restore trusted source metadata."""
     questions=response.get('questions') if isinstance(response,dict) else None
@@ -908,17 +958,25 @@ def revision_batch():
         if qid not in (new_state.get('revision_trials') or {}):
             print('修正バッチ中断: 排他ロック等により試行できませんでした')
             break
-        processed.append((qid,new_state['revision_trials'][qid].get('status','UNKNOWN')))
-        if result==2:
+        status=new_state['revision_trials'][qid].get('status','UNKNOWN')
+        processed.append((qid,status))
+        # Fail fast on systematic provider/schema errors; do not burn all three
+        # repairs on identical HTTP/JSON failures in one session.
+        if result==2 or status=='REVISION_ERROR':
+            print('修正バッチ中断: 失敗内容を確認するまで追加API利用なし')
             break
     print('今回の修正処理:',len(processed),'問（最大',REVISION_BATCH_SIZE,'問）')
     for uid,status in processed:
         print(' ',uid,status)
     print('改稿はすべて別管理。元データは未変更、正式採用も未実施。')
+    if any(status=='REVISION_ERROR' for _,status in processed):
+        return 1  # Explicit failure exit for provider/schema errors.
     return 0 if processed or not revision_queue(a.jread(a.STATEFILE,a.state_default())) else 2
 
 
 if __name__=='__main__':
+    if sys.argv[1:]==['revision-status']:
+        sys.exit(revision_status())
     if sys.argv[1:]==['revision-batch']:
         sys.exit(revision_batch())
     if sys.argv[1:]==['revision-preview']:

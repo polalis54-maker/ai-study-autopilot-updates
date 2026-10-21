@@ -13,7 +13,7 @@ class A:
     @staticmethod
     def state_default():return {}
 
-def run(*,count=81,cap=25,enabled=True,blocked=False,already=0):
+def run(*,count=81,cap=25,enabled=True,blocked=False,already=0,error_once=False):
     A.state={'campaign_budget_1000jpy_enabled':enabled,
              'generated':{f'Q{i}':{'status':'REVISE_UNRESOLVED','candidate':{'id':f'Q{i}'},
                          'audit':[{'review':{'issues':['weak answer']}}]}
@@ -29,8 +29,8 @@ def run(*,count=81,cap=25,enabled=True,blocked=False,already=0):
         next_id=next((q['id'] for q in queue(A.state) if q['id'] not in seen),None)
         if next_id is None:return 0
         requests.append(next_id)
-        A.state['revision_trials'][next_id]={'status':'REVIEWED_HOLD'}
-        return 0
+        A.state['revision_trials'][next_id]={'status':'REVISION_ERROR' if error_once else 'REVIEWED_HOLD'}
+        return 1 if error_once else 0
     ns={'a':A,'REVISION_BATCH_SIZE':3,'revision_queue':queue,
         'revision_one':repair,'campaign_budget_remaining':lambda st:cap,
         'daily_call_cap':lambda:25,'used_today':lambda st:0}
@@ -47,6 +47,9 @@ assert len(ids)==3 and not any(q in ('Q0','Q1','Q2') for q in ids)
 for flags in ({'blocked':True},{'enabled':False},{'cap':2}):
     ret,ids,state=run(**flags)
     assert ret==2 and ids==[],flags
+ret,ids,state=run(error_once=True)
+assert ret==1 and len(ids)==1, 'provider failure must stop with nonzero exit'
+assert state['revision_trials'][ids[0]]['status']=='REVISION_ERROR'
 ret,ids,state=run(count=0)
 assert ret==0 and ids==[]
 assert "if sys.argv[1:]==['revision-batch']" in s
