@@ -1,7 +1,7 @@
 name: Revision pipeline verification
 on:
   push:
-    branches: [feature/revision-compare-local]
+    branches: [fix/verified-only-study-sync]
   workflow_dispatch:
 permissions:
   contents: read
@@ -11,6 +11,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: python3 -m py_compile release_files/update_watchdog.py
+      - run: python3 -m py_compile release_files/live_progress.py
       - run: python3 tests/test_revision_pipeline.py
       - run: python3 tests/test_revision_http.py
       - run: python3 tests/test_revision_batch.py
@@ -19,5 +20,6 @@ jobs:
       - run: python3 tests/test_release.py
       - run: python3 tests/test_campaign.py
       - run: python3 tests/test_mobile.py
+      - run: python3 tests/test_verified_study_sync.py
       - run: python3 tests/test_trophies.py
       - run: python3 tests/test_campaign_budget.py

@@ -37,8 +37,37 @@ def update(output_dir, *, status, phase, detail='', calls=0, existing=0, generat
                 record_mobile_result(out, 'ERROR', str(exc)[:180])
 
 
+# No unattended AI-only question is eligible for publication, including old
+# Gemini PASS records. An explicit independent/local approval record, bound to
+# the exact question bytes and AWS documentation evidence, is required.
+def review_payload_digest(question):
+    if not isinstance(question,dict):
+        raise ValueError('問題の形式が不正')
+    fields=('id','exam','type','domain','topic','difficulty',
+            'question','choices','correct','explanation')
+    canonical={k:question.get(k) for k in fields}
+    encoded=json.dumps(canonical,ensure_ascii=False,sort_keys=True,
+                       separators=(',',':')).encode('utf-8')
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def is_independently_approved(question, approvals):
+    """Fail closed on every absent/stale/AI-written or poorly scoped approval."""
+    qid=question.get('id') if isinstance(question,dict) else None
+    entry=approvals.get(qid) if isinstance(approvals,dict) and isinstance(qid,str) else None
+    if not isinstance(entry,dict):
+        return False
+    if entry.get('human_approved') is not True or entry.get('official_documentation_verified') is not True:
+        return False
+    source=entry.get('documentation_url')
+    if not isinstance(source,str) or not re.fullmatch(
+            r'https://docs[.]aws[.]amazon[.]com/[A-Za-z0-9/_.%#?=&-]+',source):
+        return False
+    return entry.get('question_sha256')==review_payload_digest(question)
+
+
 def sync_study_pack(output_dir):
-    """Merge only AI-PASS proposals into bundled PWA, not Netlify or device history."""
+    """Merge independently verified proposals only; AI PASS is not enough."""
     out=Path(output_dir);study=out.parent.parent/'AI_Study'
     path=study/'questions.json';index=study/'index.html';sw=study/'sw.js'
     proposals=out/'AI_Study_追加候補.json'
@@ -61,13 +90,22 @@ def sync_study_pack(output_dir):
         ids=[q['id'] for q in current]
         if ids != [q['id'] for q in inline] or len(ids)!=len(set(ids)):
             raise ValueError('questions.jsonとindex.htmlが不一致。元データを保護して中止')
-        existing=set(ids); seen=set(); add=[]
+        # Local work/ file only. It must not be included in the public ZIP.
+        approvals_file=out.parent/'content_approvals.json'
+        registry=json.loads(approvals_file.read_text(encoding='utf-8')) if approvals_file.exists() else {}
+        approvals=registry.get('approvals',{}) if isinstance(registry,dict) else {}
+        if not isinstance(approvals,dict):
+            raise ValueError('独立承認台帳の形式が不正')
+        existing=set(ids); seen=set(); add=[]; blocked=0
         for q in incoming:
             qid=q.get('id') if isinstance(q,dict) else None
             if not isinstance(qid,str) or not qid.startswith('SAA-AUTO-') or qid in seen:
                 raise ValueError('不正な問題IDまたはパック内で重複したID')
             seen.add(qid)
             if qid in existing:continue
+            if not is_independently_approved(q,approvals):
+                blocked+=1
+                continue
             letters=set('ABCDE' if q.get('type')=='multiple' else 'ABCD')
             correct=q.get('correct'); choices=q.get('choices')
             if (q.get('exam')!='SAA-C03' or q.get('review_status')!='ai_reviewed_unverified'
@@ -82,7 +120,11 @@ def sync_study_pack(output_dir):
                 raise ValueError('候補形式不備: '+qid)
             item=dict(q);item['source']={**q['source'],'label':'AI生成・Geminiレビュー通過（公式資料未照合）'}
             add.append(item);existing.add(qid)
-        if not add:return report('UNCHANGED',total=len(current),newly_added=0)
+        if not add:
+            return report('BLOCKED_UNVERIFIED' if blocked else 'UNCHANGED',
+                          total=len(current),newly_added=0,unverified_skipped=blocked,
+                          message='人手確認・AWS資料との照合がないAI候補は同期しません' if blocked else '')
+
         merged={**base,'questions':current+add}
         raw=json.dumps(merged,ensure_ascii=False,separators=(',',':'))
         safe=raw.replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
@@ -110,7 +152,7 @@ def sync_study_pack(output_dir):
             for p in reversed(written):
                 temp=p.with_suffix(p.suffix+'.restore.tmp');temp.write_bytes(backups[p]);temp.replace(p)
             raise
-        return report('SYNCED',total=len(merged['questions']),newly_added=len(add),
+        return report('SYNCED',total=len(merged['questions']),newly_added=len(add),unverified_skipped=blocked,
                       ready_zip='AI_Study_公開用.zip',message='ローカルアプリのみ更新、Netlifyは未更新')
     except (ValueError,KeyError,TypeError,OSError,zipfile.BadZipFile) as exc:
         return report('FAILED',message=str(exc)[:250])
