@@ -7,7 +7,7 @@ source=Path('release_files/update_watchdog.py').read_text(encoding='utf-8')
 tree=ast.parse(source)
 functions={x.name:x for x in tree.body if isinstance(x,ast.FunctionDef)}
 wanted=['daily_call_cap','count_approved','existing_approved','goal_progress',
-        'used_today','campaign_due']
+        'history_calls_today','used_today','campaign_due']
 for n in wanted:
     assert n in functions,n
 scope={'CAMPAIGN_START':'2026-10-19','CUTOFF':'2026-10-28',
