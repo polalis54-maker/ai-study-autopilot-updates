@@ -1028,7 +1028,170 @@ def revision_batch():
     return 0 if processed or not revision_queue(a.jread(a.STATEFILE,a.state_default())) else 2
 
 
+def reviewed_revision_for_staging(state,qid):
+    """Convert one held (NEVER published) revision into the PWA's choice format."""
+    if not isinstance(qid,str) or not re.fullmatch(r'SAA-AUTO-[0-9]{5}',qid):
+        raise ValueError('問題IDが不正')
+    original=(state.get('generated') or {}).get(qid)
+    trial=(state.get('revision_trials') or {}).get(qid)
+    if not isinstance(original,dict) or not isinstance(trial,dict):
+        raise ValueError('元問題または改稿履歴がありません')
+    if trial.get('status')!='REVIEWED_HOLD' or trial.get('original_status')!=original.get('status'):
+        raise ValueError('改稿が審査済み保留ではない、または元問題の状態が変化しました')
+    review=trial.get('review')
+    if not isinstance(review,dict) or review.get('verdict')!='PASS' or not a.meets_exam_quality(review):
+        raise ValueError('Geminiの独立再審査が不十分')
+    candidate=trial.get('candidate')
+    if not isinstance(candidate,dict) or candidate.get('id')!=qid:
+        raise ValueError('改稿IDまたは候補形式が不正')
+    a.validate(candidate,strict=True)
+    expected=5 if candidate.get('type')=='multiple' else 4
+    letters='ABCDE'[:expected]
+    raw_choices=candidate.get('choices')
+    if isinstance(raw_choices,list) and len(raw_choices)==expected:
+        choices=dict(zip(letters,raw_choices))
+    elif isinstance(raw_choices,dict) and set(raw_choices)==set(letters):
+        choices={letter:raw_choices[letter] for letter in letters}
+    else:
+        raise ValueError('選択肢をPWAのA～E表記に変換できません')
+    correct=candidate.get('correct')
+    if (not all(isinstance(v,str) and v.strip() for v in choices.values())
+        or not isinstance(correct,list)
+        or len(correct)!=(2 if expected==5 else 1)
+        or len(set(correct))!=len(correct)
+        or not set(correct)<=set(letters)):
+        raise ValueError('改稿の選択肢・正解形式が不正')
+    if (candidate.get('exam')!='SAA-C03'
+        or not isinstance(candidate.get('question'),str)
+        or len(candidate['question'])<40
+        or not isinstance(candidate.get('explanation'),str)
+        or len(candidate['explanation'])<75):
+        raise ValueError('問題文または解説がPWAの最低品質基準を満たしていません')
+    source=candidate.get('source')
+    if not isinstance(source,dict) or source.get('kind')!='original':
+        raise ValueError('問題の出典表示が不正')
+    result={k:candidate[k] for k in ('id','exam','domain','topic','type',
+            'difficulty','question','correct','explanation')}
+    result.update({'choices':choices,
+                   'source':{'kind':'original','label':'AI Study / independent review pending'},
+                   'language':'ja','review_status':'ai_reviewed_unverified'})
+    return result
+
+
+def revision_stage(qid):
+    """Stage exactly one reviewed revision locally, without approval or paid calls."""
+    if not STOP.exists():
+        print('Autopilot停止後に修正版を準備してください');return 2
+    lock=ua.windows_lock(LOCK)
+    if lock is None:
+        print('Autopilotが稼働中。データ変更なし');return 2
+    try:
+        state=a.jread(a.STATEFILE,a.state_default())
+        try:
+            candidate=reviewed_revision_for_staging(state,qid)
+            if question_is_near_duplicate(candidate,[],state):
+                raise ValueError('既存問題との重複が疑われるため手動確認が必要')
+            staged_path=ROOT/'work'/'outputs'/'revision_staged.json'
+            document=a.jread(staged_path,{'questions':[]})
+            questions=document.get('questions') if isinstance(document,dict) else None
+            if not isinstance(questions,list):
+                raise ValueError('改稿ステージの既存データが不正')
+            for old in questions:
+                if not isinstance(old,dict) or not isinstance(old.get('id'),str):
+                    raise ValueError('改稿ステージの問題IDが不正')
+                if old['id']==qid:
+                    if old==candidate:
+                        print('同じ改稿が準備済みです（変更なし）');return 0
+                    raise ValueError('同じIDの別の改稿が存在。上書きしません')
+            document['questions']=questions+[candidate]
+            a.jwrite(staged_path,document)
+            print('改稿候補をPC上に準備:',qid)
+            print('未承認のためアプリにもNetlifyにも反映されません。')
+            return 0
+        except (ValueError,TypeError,KeyError) as exc:
+            print('改稿候補を保留:',str(exc)[:190]);return 2
+    finally:
+        ua.release_lock(lock)
+
+
+def revision_approve(qid,documentation_url):
+    """Explicit human-only approval after inspecting all choices and AWS docs.
+
+    This command does not check internet contents; it records the operator's
+    attestation. It NEVER calls paid APIs or deploys to Netlify.
+    """
+    if not STOP.exists():
+        print('Autopilot停止後に実行してください');return 2
+    if not isinstance(documentation_url,str) or not re.fullmatch(
+            r'https://docs[.]aws[.]amazon[.]com/[A-Za-z0-9/_.%#?=&-]+',documentation_url):
+        print('AWS公式ドキュメントのHTTPS URLを指定してください');return 2
+    lock=ua.windows_lock(LOCK)
+    if lock is None:
+        print('Autopilot稼働中。承認・同期しません');return 2
+    try:
+        try:
+            state=a.jread(a.STATEFILE,a.state_default())
+            prepared=reviewed_revision_for_staging(state,qid)
+            import live_progress as lp
+            digest=lp.review_payload_digest(prepared)
+            out=ROOT/'work'/'outputs'
+            staged=out/'revision_staged.json'
+            doc=a.jread(staged,{'questions':[]})
+            arr=doc.get('questions') if isinstance(doc,dict) else None
+            if not isinstance(arr,list):
+                raise ValueError('準備済み問題パックが不正')
+            found=next((x for x in arr if isinstance(x,dict) and x.get('id')==qid),None)
+            if found!=prepared:
+                raise ValueError('改稿は revision-stage で準備し、内容が一致する必要があります')
+            if question_is_near_duplicate(prepared,[],state):
+                raise ValueError('既存問題との重複の疑いあり。承認不可')
+            ledger_path=ROOT/'work'/'content_approvals.json'
+            reg=a.jread(ledger_path,{'approvals':{}})
+            approvals=reg.get('approvals') if isinstance(reg,dict) else None
+            if not isinstance(approvals,dict):
+                raise ValueError('承認台帳の形式が不正')
+            old=approvals.get(qid)
+            if old is not None:
+                if not isinstance(old,dict) or old.get('question_sha256')!=digest:
+                    raise ValueError('既存の承認と改稿内容が異なります。自動上書きしません')
+                if old.get('human_approved') is not True:
+                    raise ValueError('承認済み台帳の状態が不正')
+                print('同一内容の承認は登録済み。PC同期だけ再試行します。')
+            else:
+                print('注意: AI/Geminiの合格は技術的な正確性の証明ではありません。')
+                print('対象:',qid,'AWS参照資料:',documentation_url)
+                print('改稿本文・正解・全誤答理由を確認し、資料と照合した人だけ承認できます。')
+                answer=input('自分で全選択肢を検証した場合のみ問題IDをそのまま入力: ').strip()
+                if answer!=qid:
+                    print('照合確認なし。承認も同期もしません');return 2
+                approvals[qid]={
+                    'human_approved':True,'official_documentation_verified':True,
+                    'documentation_url':documentation_url,
+                    'question_sha256':digest,'reviewed_at':a.today(),
+                    'reviewed_by':'local_operator'}
+                reg['approvals']=approvals
+                a.jwrite(ledger_path,reg)
+            # Only local PWA files are synced here; mobile publication is separate.
+            result=lp.sync_study_pack(out)
+            print('ローカル学習アプリ同期:',result.get('status'),
+                  '新規追加',result.get('newly_added',0),'問')
+            if result.get('status') not in ('SYNCED','UNCHANGED'):
+                print('同期未完了。承認台帳は保存済みで、再試行できます。')
+                return 1
+            print('スマホ版への自動配信なし。学習履歴の変更なし。')
+            return 0
+        except (ValueError,TypeError,KeyError,OSError) as exc:
+            print('承認・同期を停止:',str(exc)[:180])
+            return 2
+    finally:
+        ua.release_lock(lock)
+
+
 if __name__=='__main__':
+    if len(sys.argv)==4 and sys.argv[1]=='revision-approve':
+        sys.exit(revision_approve(sys.argv[2],sys.argv[3]))
+    if len(sys.argv)==3 and sys.argv[1]=='revision-stage':
+        sys.exit(revision_stage(sys.argv[2]))
     if len(sys.argv)==3 and sys.argv[1]=='revision-compare':
         sys.exit(revision_compare(sys.argv[2]))
     if sys.argv[1:]==['revision-status']:
