@@ -6,6 +6,7 @@ s=Path('release_files/update_watchdog.py').read_text(encoding='utf-8')
 tree=ast.parse(s)
 func=next(x for x in tree.body if isinstance(x,ast.FunctionDef) and x.name=='revision_batch')
 class A:
+    STATEFILE='work/state.json'
     state={}
     @classmethod
     def jread(cls,*args):return cls.state
