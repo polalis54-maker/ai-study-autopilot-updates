@@ -855,21 +855,85 @@ h1{font-size:1.5rem;margin:0 0 8px}.warning{color:#ffe1a1;font-weight:700}
 button:disabled{opacity:.55;cursor:not-allowed}.bar{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
 .action{background:#ffe0a3;color:#161e2d;border:0;padding:12px 20px;border-radius:10px;font:inherit;font-weight:700;cursor:pointer}
 .action.secondary{background:#3d4e69;color:#fff}.result{margin-top:20px;border-top:1px solid #65738b;padding-top:14px}
+#feedbackBox{margin-top:18px}#feedbackBox select,#feedbackBox textarea{display:block;width:100%;margin:8px 0 14px;padding:10px;background:#152238;color:#fff;border:1px solid #6b7892;border-radius:8px;font:inherit}
+#feedbackBox textarea{min-height:76px}#feedbackBox .action{margin:5px 8px 5px 0}#stats{white-space:pre-line}
 #explanation{white-space:pre-line}.subtle{color:#c1cbdb;font-size:.9rem}
 </style></head><body><main><div class="head"><h1>🎓 AI Study：未検証候補の練習室</h1>
 <p class="warning">⚠ AIレビュー済み・AWS公式資料未照合。正答・解説に誤りが含まれる可能性があります。</p>
 <p>ここは正式問題集とは別のローカル練習画面です。成績・トロフィー・元問題集を変更せず、ネットにも送信しません。</p>
-<p id="count" class="subtle"></p></div>
+<p id="count" class="subtle"></p><p id="stats" class="subtle" aria-live="polite"></p><p id="storageStatus" class="subtle"></p><button id="exportFeedback" class="action secondary" type="button">練習履歴・報告をJSON保存</button> <label class="subtle">保存済みJSONを読み込む <input id="importFeedback" type="file" accept="application/json,.json"></label></div>
 <section id="quiz"><div id="progress" class="subtle"></div><div id="question"></div>
 <div id="choices"></div><div class="bar">
 <button id="grade" class="action">解答・解説を表示</button><button id="next" class="action secondary">次の問題 →</button></div>
 <div id="result" class="result" hidden><div id="correct"></div><p id="explanation"></p>
 <p class="warning">この解説は未検証です。疑問があればAWS公式資料で確認してください。</p></div></section>
+<section id="feedbackBox" class="head"><h2>未検証問題の品質報告</h2><p class="subtle">報告はローカル保存のみ。AWS公式検証・自動採用には使用されません。ブラウザーのfile://保存は環境によって消えるため、JSON保存を推奨します。</p><label>回答の自信度 <select id="confidence"><option value="1">自信なし</option><option value="2" selected>普通</option><option value="3">確信あり</option></select></label><label>問題の指摘 <select id="reportReason"><option value="正答が疑わしい">正答が疑わしい</option><option value="解説が不正確">解説が不正確</option><option value="重複問題">重複問題</option><option value="その他">その他</option></select></label><label>補足（任意、500文字まで）<textarea id="reportNote" maxlength="500" placeholder="例：このAWSサービスには記載の機能がない"></textarea></label><button id="reportIssue" type="button" class="action secondary">この問題を報告として保存</button><p id="reportStatus" class="subtle" aria-live="polite"></p></section>
 </main><script>
 const questions=__PAYLOAD__;
 let index=0;
 const selected=new Set();
 const el=id=>document.getElementById(id);
+
+const STORAGE_KEY='ai-study-provisional-feedback-v1';
+const REASONS=['正答が疑わしい','解説が不正確','重複問題','その他'];
+const DOMAINS=['D1','D2','D3','D4'];
+function blankProgress(){return {schema:1,attempts:Object.create(null),reports:Object.create(null)};}
+function normalizeProgress(value){
+  if(!value||typeof value!=='object'||value.schema!==1||Array.isArray(value))throw Error('対応していない履歴形式');
+  const clean=blankProgress();
+  const attempts=value.attempts||{},reports=value.reports||{};
+  if(typeof attempts!=='object'||Array.isArray(attempts)||typeof reports!=='object'||Array.isArray(reports))throw Error('履歴形式が不正');
+  if(Object.keys(attempts).length>5000||Object.keys(reports).length>5000)throw Error('履歴件数が上限超過');
+  for(const [id,a] of Object.entries(attempts)){
+    if(!/^SAA-AUTO-\d{5,}$/.test(id)||!a||!DOMAINS.includes(a.domain))continue;
+    if(!Number.isSafeInteger(a.tries)||a.tries<1||a.tries>100000||
+       !Number.isSafeInteger(a.repeatCorrect)||a.repeatCorrect<0||a.repeatCorrect>=a.tries)continue;
+    clean.attempts[id]={domain:a.domain,tries:a.tries,firstCorrect:a.firstCorrect===true,
+      lastCorrect:a.lastCorrect===true,repeatCorrect:a.repeatCorrect,
+      confidence:[1,2,3].includes(a.confidence)?a.confidence:2};
+  }
+  for(const [id,r] of Object.entries(reports)){
+    if(!/^SAA-AUTO-\d{5,}$/.test(id)||!r||!DOMAINS.includes(r.domain)||!REASONS.includes(r.reason))continue;
+    clean.reports[id]={domain:r.domain,reason:r.reason,note:typeof r.note==='string'?r.note.slice(0,500):'',
+      reportedAt:typeof r.reportedAt==='string'?r.reportedAt.slice(0,32):''};
+  }
+  return clean;
+}
+function loadProgress(){
+  try{const raw=localStorage.getItem(STORAGE_KEY);return raw?normalizeProgress(JSON.parse(raw)):blankProgress();}
+  catch{return blankProgress();}
+}
+let practiceProgress=loadProgress();
+function persistProgress(){
+  try{localStorage.setItem(STORAGE_KEY,JSON.stringify(practiceProgress));
+    el('storageStatus').textContent='練習履歴はこのブラウザーにも保存済み。別日・別ブラウザーへの移行にはJSON保存を使ってください。';return true;}
+  catch{el('storageStatus').textContent='ブラウザー保存が使えません。ページを閉じる前にJSON保存してください。';return false;}
+}
+function summarizeProgress(data){
+  const byDomain=Object.fromEntries(DOMAINS.map(d=>[d,{first:0,firstCorrect:0,repeats:0,repeatCorrect:0}]));
+  for(const a of Object.values(data.attempts)){
+    const d=byDomain[a.domain];if(!d)continue;
+    d.first++;if(a.firstCorrect)d.firstCorrect++;
+    d.repeats+=a.tries-1;d.repeatCorrect+=a.repeatCorrect;
+  }
+  return byDomain;
+}
+function renderStats(){
+  const stats=summarizeProgress(practiceProgress);
+  el('stats').textContent='未検証練習の記録（公式成績・トロフィーとは別）\n'+
+    DOMAINS.map(d=>{const x=stats[d];return d+' 初見 '+x.firstCorrect+'/'+x.first+
+      '・再挑戦 '+x.repeatCorrect+'/'+x.repeats;}).join(' | ')+
+    '\n品質報告 '+Object.keys(practiceProgress.reports).length+'件';
+}
+function recordAttempt(q,correct){
+  let a=practiceProgress.attempts[q.id];
+  const confidence=Number(el('confidence').value);
+  if(a){a.tries++;a.lastCorrect=correct;if(correct)a.repeatCorrect++;}
+  else{a={domain:q.domain,tries:1,firstCorrect:correct,lastCorrect:correct,repeatCorrect:0};
+    practiceProgress.attempts[q.id]=a;}
+  a.confidence=[1,2,3].includes(confidence)?confidence:2;
+  persistProgress();renderStats();
+}
 el('count').textContent=questions.length+'問のAI品質保留候補（この画面の問題は正式採用数に含まれません）。';
 function show(){
   const q=questions[index];selected.clear();
@@ -890,16 +954,51 @@ function show(){
   el('result').hidden=true;
   el('next').disabled=index===questions.length-1;
   el('grade').disabled=false;
+  el('reportStatus').textContent=practiceProgress.reports[q.id]?'この問題には保存済みの報告があります。':'';
+  el('reportNote').value=practiceProgress.reports[q.id]?.note||'';
 }
 el('grade').onclick=()=>{
   const q=questions[index];
-  const picked=[...selected].sort().join(',')||'未選択';
+  if(selected.size!==q.correct.length){el('reportStatus').textContent='必要な選択肢を選んでから採点してください。';return;}
+  const picked=[...selected].sort().join(',');
   const correct=q.correct.slice().sort().join(',');
+  recordAttempt(q,picked===correct);
+  el('grade').disabled=true;
+  [...el('choices').children].forEach(b=>b.disabled=true);
   el('correct').textContent='あなたの回答: '+picked+' / AI暫定正解: '+correct+(picked===correct?' （一致）':' （不一致）');
   el('explanation').textContent=q.explanation;
   el('result').hidden=false;
 };
 el('next').onclick=()=>{if(index<questions.length-1){index++;show();}};
+el('reportIssue').onclick=()=>{
+  const q=questions[index],reason=el('reportReason').value;
+  if(!REASONS.includes(reason))return;
+  practiceProgress.reports[q.id]={domain:q.domain,reason,note:el('reportNote').value.trim().slice(0,500),
+    reportedAt:new Date().toISOString()};
+  const saved=persistProgress();renderStats();
+  el('reportStatus').textContent=saved?'問題ID '+q.id+' の報告を保存しました。':'一時記録しました。JSONを保存して残してください。';
+};
+el('exportFeedback').onclick=()=>{
+  const blob=new Blob([JSON.stringify(practiceProgress,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob),a=document.createElement('a');
+  a.href=url;a.download='AI_Study_未検証練習履歴.json';a.click();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
+el('importFeedback').onchange=async event=>{
+  const file=event.target.files?.[0];if(!file)return;
+  try{
+    if(file.size>1024*1024)throw Error('ファイルが大きすぎます');
+    const imported=normalizeProgress(JSON.parse(await file.text()));
+    if(!confirm('現在の未検証練習記録を、読み込んだJSONで置き換えますか？'))return;
+    practiceProgress=imported;persistProgress();renderStats();show();
+    el('reportStatus').textContent='履歴を読み込みました。';
+  }catch(error){el('reportStatus').textContent='読み込み失敗: '+String(error.message).slice(0,100);}
+  finally{event.target.value='';}
+};
+renderStats();
+try{localStorage.getItem(STORAGE_KEY);
+  el('storageStatus').textContent='ブラウザー内の記録を利用中。別日への確実な移行はJSON保存・読み込みを使ってください。';}
+catch{el('storageStatus').textContent='ブラウザー保存不可。閉じる前にJSON保存してください。';}
 show();
 </script></body></html>'''
 
