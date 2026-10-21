@@ -64,6 +64,8 @@ jobs:
         run: python3 tests/test_revision_batch.py
       - name: Verify read-only revision status and batch error stop
         run: python3 tests/test_revision_status.py
+      - name: Verify local-only revision comparison without provider calls
+        run: python3 tests/test_revision_compare.py
       - name: Package and checksum permitted files
         id: package
         shell: bash
