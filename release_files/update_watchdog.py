@@ -883,7 +883,44 @@ def revision_one():
         ua.release_lock(lock)
 
 
+# This is intentionally opt-in, not a new unattended scheduler path.
+# Release integration and real-provider output must be validated first.
+REVISION_BATCH_SIZE=3
+
+
+def revision_batch():
+    """Try at most three DIFFERENT problems with existing budget safeguards."""
+    processed=[]
+    for _ in range(REVISION_BATCH_SIZE):
+        state=a.jread(a.STATEFILE,a.state_default())
+        seen=set((state.get('revision_trials') or {}).keys())
+        available=[q for q in revision_queue(state) if q['id'] not in seen and q['issues']]
+        if not available:
+            break
+        if (not state.get('campaign_budget_1000jpy_enabled',False)
+                or campaign_budget_remaining(state)<3
+                or daily_call_cap()-used_today(state)<3):
+            print('修正バッチ中断: 有効化またはAPI残枠を確認（追加利用なし）')
+            break
+        qid=available[0]['id']
+        result=revision_one()  # Acquires watchdog lock and persists trial independently.
+        new_state=a.jread(a.STATEFILE,a.state_default())
+        if qid not in (new_state.get('revision_trials') or {}):
+            print('修正バッチ中断: 排他ロック等により試行できませんでした')
+            break
+        processed.append((qid,new_state['revision_trials'][qid].get('status','UNKNOWN')))
+        if result==2:
+            break
+    print('今回の修正処理:',len(processed),'問（最大',REVISION_BATCH_SIZE,'問）')
+    for uid,status in processed:
+        print(' ',uid,status)
+    print('改稿はすべて別管理。元データは未変更、正式採用も未実施。')
+    return 0 if processed or not revision_queue(a.jread(a.STATEFILE,a.state_default())) else 2
+
+
 if __name__=='__main__':
+    if sys.argv[1:]==['revision-batch']:
+        sys.exit(revision_batch())
     if sys.argv[1:]==['revision-preview']:
         sys.exit(revision_preview())
     if sys.argv[1:]==['revision-one']:
