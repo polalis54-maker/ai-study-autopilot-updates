@@ -975,17 +975,100 @@ def preview_practice(root=None, *, open_page=False):
         webbrowser.open(dest.resolve().as_uri())
     return {'status':'CREATED','count':len(candidates),'path':str(dest)}
 
+
+def prepare_daily_practice(root=None, *, open_page=False, today=None, max_questions=20):
+    """Deliver previously unseen AI-PASS/QUALITY_HOLD candidates, privately.
+
+    Never modifies the main PC/mobile question bank, study history, source data,
+    paid API counters, or provider keys. Delivery ledger is only a list of IDs.
+    """
+    root=Path(root) if root is not None else Path(__file__).resolve().parent
+    day=today or datetime.datetime.now().astimezone().date().isoformat()
+    if not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}',day):
+        raise ValueError('不正な日付')
+    if type(max_questions) is not int or not 1<=max_questions<=100:
+        raise ValueError('日次出題数が不正')
+    work=root/'work';out=work/'outputs'
+    statefile=work/'state.json'
+    if not statefile.exists():
+        print('[DAILY] 生成状態なし。新問はまだありません。')
+        return {'status':'NO_STATE','new_questions':0}
+    state=json.loads(statefile.read_text(encoding='utf-8-sig'))
+    candidates=preview_candidates(state)
+    ledger_path=work/'practice_delivery.json'
+    ledger=json.loads(ledger_path.read_text(encoding='utf-8')) if ledger_path.exists() else {}
+    if not isinstance(ledger,dict) or not isinstance(ledger.get('delivered_ids',[]),list):
+        raise ValueError('練習配信台帳が不正')
+    delivered=ledger.get('delivered_ids',[])
+    if len(delivered)!=len(set(delivered)) or any(
+            not isinstance(uid,str) for uid in delivered):
+        raise ValueError('練習配信IDが不正')
+    existing_page=out/'AI_Study_本日の新問.html'
+    # Idempotent same-day generation: retain the exact morning set even if the
+    # watchdog restarts or gets another hourly tick.
+    if ledger.get('date')==day and existing_page.exists():
+        result={'status':'ALREADY_READY','date':day,
+                'new_questions':int(ledger.get('new_questions',0)),
+                'available_candidates':len(candidates),
+                'path':str(existing_page)}
+        if open_page:
+            import webbrowser
+            webbrowser.open(existing_page.resolve().as_uri())
+        return result
+    unseen=[q for q in candidates if q['id'] not in set(delivered)]
+    selected=unseen[:max_questions]
+    out.mkdir(parents=True,exist_ok=True)
+    if selected:
+        payload=json.dumps(selected,ensure_ascii=False,separators=(',',':'))
+        # HTML script-data escape: never execute provider-authored markup.
+        payload=payload.replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
+        payload=payload.replace('\u2028','\\u2028').replace('\u2029','\\u2029')
+        page=PREVIEW_HTML.replace('__PAYLOAD__',payload)
+        page=page.replace('AI Study：未検証候補の練習室',
+                          'AI Study：'+day+' 新問（公式未検証）')
+        page=page.replace('AI品質保留候補（この画面の問題は正式採用数に含まれません）',
+                          '本日の新問（この画面の問題は正式採用数に含まれません）')
+    else:
+        page=('<!doctype html><html lang="ja"><meta charset="utf-8">'
+              '<title>AI Study 日次新問 0問</title><body>'
+              '<h1>新規問題は0問です</h1><p>日付：'+day+'</p>'
+              '<p>AIレビューを通過した未配信の候補がありません。'
+              '自動生成が停止していないか、API利用上限・PC稼働状況を確認してください。'
+              '既存の正式問題集は変更されていません。</p></body></html>')
+    tmp=existing_page.with_suffix('.html.tmp')
+    tmp.write_text(page,encoding='utf-8')
+    tmp.replace(existing_page)
+    report={'status':'READY' if selected else 'NO_NEW',
+            'date':day,'new_questions':len(selected),
+            'available_candidates':len(candidates),
+            'held_unseen_remaining':len(unseen)-len(selected),
+            'path':str(existing_page),
+            'notice':'Geminiレビューのみ。AWS公式未照合。正答は暫定。'}
+    ledger={'date':day,'new_questions':len(selected),
+            'delivered_ids':delivered+[q['id'] for q in selected]}
+    save_json(ledger_path,ledger)
+    save_json(out/'daily_practice_status.json',report)
+    print('[DAILY]',day,'本日の新問:',len(selected),
+          '/ 今回配信できる未検証候補:',len(candidates))
+    print('[DAILY] 問題表示:',existing_page,'/ API 0回 / 正式問題集は変更なし')
+    if open_page:
+        import webbrowser
+        webbrowser.open(existing_page.resolve().as_uri())
+    return report
+
+
 if __name__=='__main__':
     cmd=sys.argv[1:] if len(sys.argv)>1 else []
     try:
-        if cmd==['practice-preview']:preview_practice(open_page=True)
+        if cmd==['practice-today']:prepare_daily_practice(open_page=True)
+        elif cmd==['practice-preview']:preview_practice(open_page=True)
         elif cmd==['setup-mobile']:setup_mobile_sync()
         elif cmd==['deploy-mobile']:publish_mobile(force=True)
         elif cmd==['status-mobile']:
             _,_,out=mobile_paths()
             p=out/'mobile_publish_status.json'
             print(p.read_text(encoding='utf-8') if p.exists() else 'No mobile deployment yet')
-        else:print('Usage: py -3 live_progress.py practice-preview|setup-mobile|deploy-mobile|status-mobile')
+        else:print('Usage: py -3 live_progress.py practice-today|practice-preview|setup-mobile|deploy-mobile|status-mobile')
     except Exception as exc:
         print('[MOBILE] ERROR:',str(exc)[:210])
         sys.exit(1)
