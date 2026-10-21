@@ -1114,7 +1114,82 @@ def revision_stage(qid):
         ua.release_lock(lock)
 
 
+def revision_approve(qid,documentation_url):
+    """Explicit human-only approval after inspecting all choices and AWS docs.
+
+    This command does not check internet contents; it records the operator's
+    attestation. It NEVER calls paid APIs or deploys to Netlify.
+    """
+    if not STOP.exists():
+        print('Autopilot停止後に実行してください');return 2
+    if not isinstance(documentation_url,str) or not re.fullmatch(
+            r'https://docs[.]aws[.]amazon[.]com/[A-Za-z0-9/_.%#?=&-]+',documentation_url):
+        print('AWS公式ドキュメントのHTTPS URLを指定してください');return 2
+    lock=ua.windows_lock(LOCK)
+    if lock is None:
+        print('Autopilot稼働中。承認・同期しません');return 2
+    try:
+        try:
+            state=a.jread(a.STATEFILE,a.state_default())
+            prepared=reviewed_revision_for_staging(state,qid)
+            import live_progress as lp
+            digest=lp.review_payload_digest(prepared)
+            out=ROOT/'work'/'outputs'
+            staged=out/'revision_staged.json'
+            doc=a.jread(staged,{'questions':[]})
+            arr=doc.get('questions') if isinstance(doc,dict) else None
+            if not isinstance(arr,list):
+                raise ValueError('準備済み問題パックが不正')
+            found=next((x for x in arr if isinstance(x,dict) and x.get('id')==qid),None)
+            if found!=prepared:
+                raise ValueError('改稿は revision-stage で準備し、内容が一致する必要があります')
+            if question_is_near_duplicate(prepared,[],state):
+                raise ValueError('既存問題との重複の疑いあり。承認不可')
+            ledger_path=ROOT/'work'/'content_approvals.json'
+            reg=a.jread(ledger_path,{'approvals':{}})
+            approvals=reg.get('approvals') if isinstance(reg,dict) else None
+            if not isinstance(approvals,dict):
+                raise ValueError('承認台帳の形式が不正')
+            old=approvals.get(qid)
+            if old is not None:
+                if not isinstance(old,dict) or old.get('question_sha256')!=digest:
+                    raise ValueError('既存の承認と改稿内容が異なります。自動上書きしません')
+                if old.get('human_approved') is not True:
+                    raise ValueError('承認済み台帳の状態が不正')
+                print('同一内容の承認は登録済み。PC同期だけ再試行します。')
+            else:
+                print('注意: AI/Geminiの合格は技術的な正確性の証明ではありません。')
+                print('対象:',qid,'AWS参照資料:',documentation_url)
+                print('改稿本文・正解・全誤答理由を確認し、資料と照合した人だけ承認できます。')
+                answer=input('自分で全選択肢を検証した場合のみ問題IDをそのまま入力: ').strip()
+                if answer!=qid:
+                    print('照合確認なし。承認も同期もしません');return 2
+                approvals[qid]={
+                    'human_approved':True,'official_documentation_verified':True,
+                    'documentation_url':documentation_url,
+                    'question_sha256':digest,'reviewed_at':a.today(),
+                    'reviewed_by':'local_operator'}
+                reg['approvals']=approvals
+                a.jwrite(ledger_path,reg)
+            # Only local PWA files are synced here; mobile publication is separate.
+            result=lp.sync_study_pack(out)
+            print('ローカル学習アプリ同期:',result.get('status'),
+                  '新規追加',result.get('newly_added',0),'問')
+            if result.get('status') not in ('SYNCED','UNCHANGED'):
+                print('同期未完了。承認台帳は保存済みで、再試行できます。')
+                return 1
+            print('スマホ版への自動配信なし。学習履歴の変更なし。')
+            return 0
+        except (ValueError,TypeError,KeyError,OSError) as exc:
+            print('承認・同期を停止:',str(exc)[:180])
+            return 2
+    finally:
+        ua.release_lock(lock)
+
+
 if __name__=='__main__':
+    if len(sys.argv)==4 and sys.argv[1]=='revision-approve':
+        sys.exit(revision_approve(sys.argv[2],sys.argv[3]))
     if len(sys.argv)==3 and sys.argv[1]=='revision-stage':
         sys.exit(revision_stage(sys.argv[2]))
     if len(sys.argv)==3 and sys.argv[1]=='revision-compare':
