@@ -50,7 +50,7 @@ assert not scope['campaign_due'](s),'Never spend after exam preparation deadline
 day[0]='2026-10-18'
 assert not scope['campaign_due'](s),'Campaign must not retroactively spend prior date'
 
-assert 'GEN_DAILY=4' in source, 'Do not silently cap at twenty attempts'
+assert 'GEN_DAILY=20' in source, 'Generate enough candidates per unattended day, within unchanged API caps'
 assert "and goal_progress(state)<GOAL_TOTAL" in source, 'Stop at goal in-batch'
 assert "'campaign_paused_date'" in source
 assert 'campaign_due(_read_obj(ROOT/' in source
