@@ -387,7 +387,7 @@ def campaign_due(state):
         return False
     if state.get('campaign_paused_date')==day:
         return False
-    if daily_call_cap()-used_today(state)<4:
+    if daily_call_cap()-used_today(state)<4 or campaign_budget_remaining(state)<4:
         return False
     # Do not launch another batch until this day's prior run is fully committed.
     return bool(state.get('last_attempt')==day and
