@@ -42,6 +42,37 @@ For an overview without API calls or writes:
 py -3 .\update_watchdog.py revision-status
 ```
 
+## When Gemini PASS is wrong
+
+A Gemini `PASS` does not override a human technical review. If the revised
+question still contains inaccurate AWS explanations, **do not stage or approve it**.
+
+After checking the complete question and all distractors, run these commands
+on your own Windows machine with Autopilot stopped:
+
+```powershell
+# Record a human rejection. Does not call OpenAI or Gemini.
+py -3 .\\update_watchdog.py revision-request-changes SAA-AUTO-00020 "Explain the actual AWS feature limitations, correct misleading distractors, and distinguish event fanout from queue replication."
+
+# Only when you explicitly choose another paid trial and the local day/campaign
+# budget has room for up to three provider requests:
+py -3 .\\update_watchdog.py revision-retry SAA-AUTO-00020
+
+# Inspect the new result before considering publication.
+py -3 .\\update_watchdog.py revision-compare SAA-AUTO-00020
+```
+
+The first command keeps the previous revision, Gemini PASS, and issue notes in
+`work/state.json`; sets `REVISION_REQUESTED`; and prevents staging/approval.
+The explicit retry feeds the actual human QA feedback into another revision
+attempt, archives the previous trial in `revision_trial_history`, preserves
+the original source and study history, and leaves the latest result on hold.
+No retry is automatic. A rejected trial cannot be treated as reviewed/approved.
+
+**Never claim the second repair is correct until its AWS facts have been checked.**
+The request-count budget uses an estimated 5 JPY reservation per provider call
+and **does not guarantee** actual billed spend is under 1000 JPY.
+
 ## Developer tests
 
 ```sh
