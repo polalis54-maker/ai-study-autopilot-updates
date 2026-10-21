@@ -96,6 +96,55 @@ trophies, approvals, or Netlify. The output file is local:
 study app. Actual availability depends on the user's local state, and
 all provisional answers require independent fact-checking.
 
+## Unattended overnight practice (Windows PC stays powered on)
+
+**Intended daily workflow:** Keep the existing Windows Autopilot watchdog
+running. The watchdog uses the configured local Windows timezone/date and
+does not require ChatGPT to be open. Each day's first run generates up to 20
+new SAA-C03 candidates by OpenAI/Gemini and then automatically prepares a
+private `work/outputs/AI_Study_本日の新問.html` quiz from **only unseen**
+Gemini-PASS `QUALITY_HOLD` items.
+
+The morning quiz is **provisional** and clearly labeled AWS-docs-unverified.
+The main scored PWA and Netlify remain independent and unchanged, because
+Gemini PASS has demonstrably produced incorrect explanations. Incorrect
+rejected candidates are excluded from the daily practice set.
+
+This still obeys the existing **25 provider requests/day**, **150 reserved
+requests/campaign**, and **2026-10-28 cutoff**. Up to 20 new questions is a
+best-effort generation target, **not** a guaranteed delivery count. The
+software will not invent questions or spend past those budget/cutoff guards.
+The 1000 JPY reservation is a proxy, not a real-billing maximum.
+
+One-time Windows wakeup after intentionally stopping the watchdog:
+
+```powershell
+# From the existing AI_Study_Autopilot directory:
+Remove-Item .\\work\\stop_requested -ErrorAction SilentlyContinue
+.\\START_AUTOPILOT.cmd
+```
+
+If the original installer instead enabled Task Scheduler or another autorun
+command, keep using the configured startup script/task. Do not start two
+watchdog processes. The computer must be powered on and not asleep; a sleeping
+or powered-off PC will not run an unattended Python process.
+
+After waking up, the owner can open the automatically created quiz with:
+
+```powershell
+py -3 .\\live_progress.py practice-today
+```
+
+This command also creates a daily practice page immediately from previously
+unseen saved candidates if there is no page yet. **It makes no API calls.**
+The local `work/practice_delivery.json` records previously served problem IDs
+so tomorrow's practice does not present the same question as 'new'. If the
+hold queue is empty, the morning page explicitly says 0 new questions.
+
+Do not mark this objective done until the owner verifies a genuinely new
+daily page and the original/PC/mobile exam-question bank and attempt history
+remain intact.
+
 ## Developer tests
 
 ```sh
