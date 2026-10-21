@@ -144,9 +144,15 @@ def structured_batch_call(client, prompt, payload):
         raise RuntimeError(f'OpenAI structured response HTTP {exc.code}') from None
     except (TimeoutError,urllib.error.URLError):
         raise RuntimeError('OpenAI network error / timeout') from None
+    # Keep telemetry separate from question JSON; never trust a model's own count.
+    usage=output.get('usage') or {}
+    client.generation_usage={'output_tokens':usage.get('output_tokens'),
+                             'requested_questions':len(payload.get('specs',[]))}
     if output.get('status')=='incomplete':
         reason=(output.get('incomplete_details') or {}).get('reason','unknown')
-        raise ValueError('OpenAI response truncated: '+str(reason)+' (model='+GENERATION_MODEL+')')
+        error=ValueError('OpenAI response truncated: '+str(reason)+' (model='+GENERATION_MODEL+')')
+        error.output_truncated=reason=='max_output_tokens'
+        raise error
     if output.get('status')!='completed':
         raise ValueError('OpenAI response not completed')
     texts=[item.get('text','') for block in output.get('output',[])
@@ -437,6 +443,8 @@ def fix_retry_due(state):
 
 
 def run_fast(*,demo=False,force=False,generate_only=False):
+    if not demo and (ROOT/'work'/'supply_campaign.json').exists():
+        return run_supply()
     if a.today()>CUTOFF and not demo:
         print('10/28を過ぎたため生成停止');return 0
     existing=a.jread(a.STUDY_FILE)['questions']
@@ -693,18 +701,45 @@ def write_runtime_status(status, detail='', child_pid=None):
       'sync_status':_read_obj(ROOT/'work'/'outputs'/'study_sync_status.json').get('status','未記録'),
       'mobile_status':_read_obj(ROOT/'work'/'outputs'/'mobile_publish_status.json').get('status','未設定'),
       'mobile_questions':_read_obj(ROOT/'work'/'outputs'/'mobile_publish_status.json').get('questions','未記録')}
+    supply=_read_obj(ROOT/'work'/'outputs'/'daily_practice_status.json')
+    if (ROOT/'work'/'supply_campaign.json').exists():
+        data['supply']=supply
+        data['next_run']=_read_obj(ROOT/'work'/'outputs'/'supply_run.json').get('reason','新問供給設定を確認中')
+        if status.startswith('SUPPLY_'):data['next_run']=detail
+        try:data['supply_remaining_calls']=supply_remaining_calls(state,supply_config())
+        except (ValueError,OSError,KeyError,TypeError):data['supply_remaining_calls']='不明（設定・台帳を確認）'
     RUNTIME.parent.mkdir(parents=True,exist_ok=True)
     tmp=RUNTIME.with_suffix('.json.tmp')
     tmp.write_text(json.dumps(data,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     tmp.replace(RUNTIME)
     esc=lambda v:html.escape(str(v),quote=True)
     labels={'STARTING':'起動準備中','WAITING':'待機中（正常）','RUNNING':'生成・レビュー中',
-            'ERROR_WAITING':'前回エラーあり・待機中','STOPPED':'停止中'}
+            'ERROR_WAITING':'前回エラーあり・待機中','STOPPED':'停止中',
+            'SUPPLY_COMPLETE':'新問供給の累計目標達成',
+            'SUPPLY_WAITING_DAILY':'本日の新問目標達成・翌日待ち',
+            'SUPPLY_WAITING_QUOTA':'本日のAPI枠不足・翌日待ち',
+            'SUPPLY_WAITING_START':'承認開始日待ち','SUPPLY_PAUSED':'新問供給を安全停止中',
+            'SUPPLY_BUDGET_EXHAUSTED':'予算残枠不足・承認待ち',
+            'SUPPLY_EXPIRED':'新問供給の承認期間終了',
+            'SUPPLY_BILLING_EXPIRED':'実請求の確認期限切れ',
+            'SUPPLY_DISABLED':'新問供給は無効','SUPPLY_INVALID':'新問供給の設定・台帳を確認',
+            'SUPPLY_NO_BUDGET':'承認済み予算台帳なし'}
     label=labels.get(status,status)
     color='#57d6a5' if status=='WAITING' else ('#ffd078' if status in ('RUNNING','STARTING') else '#f09eab')
     latest=esc(data['last_phase'] or detail)
     err=esc(' / '.join(map(str,errors[:2])) if errors else 'なし')
     page=f'''<!doctype html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="refresh" content="8"><title>AI Study 稼働状況</title><style>body{{background:#101827;color:#f5f7fc;font:16px/1.7 system-ui,sans-serif;max-width:820px;margin:32px auto;padding:0 16px}}main{{background:#1c2840;border:1px solid #3e5375;border-radius:18px;padding:24px}}h2{{color:{color}}}small{{color:#aab8d0}}.cards{{display:flex;gap:12px;flex-wrap:wrap}}.cards>div{{background:#111c31;padding:15px;border-radius:12px;flex:1;min-width:130px}}strong{{display:block;font-size:1.4rem}}#signal{{font-weight:bold}}</style></head><body><h1>🎓 AI Study Autopilot</h1><main><small>v{esc(data['version'])}</small><h2>{esc(label)}</h2><p>{latest}</p><div class="cards"><div>既存レビュー<strong>{data['reviewed_count']} / 55</strong></div><div>新規保存<strong>{data['generated_count']}問</strong></div><div>新規AI審査保留<strong>{data['generated_provisional']}問</strong></div><div>本日の新問<strong>{data['morning_new']}問</strong></div></div><p><strong>Gemini PASS 合計: {data['goal_progress']} / {data['goal_total']} 問</strong></p><p>目標まで残り {data['goal_remaining']} 問。新規 Gemini PASS {data['generated_pass']} 問</p><p>本日のAPI利用: {data['today_calls']} / {data['today_cap']} 回 (残り {data['today_remaining']} 回)</p><p>次回: {esc(data['next_run'])}</p><p>PC内の問題同期: {esc(data['sync_status'])}</p><p><strong>スマホ版(Netlify): {esc(data['mobile_status'])}</strong> / 公開問題数: {esc(data['mobile_questions'])}</p><p>直近のエラー: {err}</p><small>生存信号: {esc(data['timestamp'])} / PID {data['watchdog_pid']}</small><p id="signal">生存信号を確認中…</p></main><p><small>8秒ごとに更新。2分間更新がなければ停止・フリーズの疑い。新問は未検証の別練習画面です。AI PASSはAWS公式確認済みではありません。</small></p><script>const t={int(data['unix_time']*1000)};function check(){{const elapsed=Math.max(0,Date.now()-t),el=document.getElementById('signal');el.textContent=elapsed>120000?'⚠ 生存信号が2分以上更新されていません':('● 生存信号あり '+Math.floor(elapsed/1000)+'秒前');el.style.color=elapsed>120000?'#ffab83':'#57d6a5';}}check();setInterval(check,4000)</script></body></html>'''
+    if 'supply' in data:
+        ledger=state.get('campaign_budget_1000jpy') or {}
+        reserved=ledger.get('reserved_calls',0)
+        page=page.replace('<p><strong>Gemini PASS 合計:', '<p><strong>旧キャンペーンのGemini PASS 合計:')
+        panel=('<h2>新問供給（公式未検証）</h2><p>新規出題可能: 今日 '+esc(supply.get('new_questions',0))
+               +'件 / 累計 '+esc(supply.get('delivered_total',0))+'/500件</p><p>この配信の検証済み: 0件 / 未検証: '
+               +esc(supply.get('new_questions',0))+'件</p><p>API予約 '+esc(reserved)+'/150回 / 推定予約 '
+               +esc(reserved*5)+'/1000円（実請求上限ではありません）</p><p>既存利用を差し引いた累積API残枠: '
+               +esc(data['supply_remaining_calls'])+'回</p><p>停止・不足理由: '
+               +esc(data['next_run'])+'</p><p><a href="AI_Study_本日の新問.html">本日の新問を解く</a></p>')
+        page=page.replace('<main>','<main>'+panel)
     tmp=DASHBOARD.with_suffix('.html.tmp')
     tmp.write_text(page,encoding='utf-8')
     tmp.replace(DASHBOARD)
@@ -742,10 +777,12 @@ def scheduler(checker=ua.check_and_apply, *, iterations=None, sleep=time.sleep):
     lock=ua.windows_lock(LOCK)
     if lock is None:
         ua.log('別のAutopilotが起動中のため二重起動しません');return
-    checks=0;next_update=0.0;previous_result=''
+    checks=0;next_update=0.0;previous_result='';terminal=None
     write_runtime_status('STARTING','常駐プログラムを起動しました')
     try:
-        while not STOP.exists() and today()<=CUTOFF:
+        while not STOP.exists():
+            supply=(ROOT/'work'/'supply_campaign.json').exists()
+            if not supply and today()>CUTOFF:break
             now=time.monotonic()
             if now>=next_update or REQUEST.exists():
                 REQUEST.unlink(missing_ok=True)
@@ -756,20 +793,30 @@ def scheduler(checker=ua.check_and_apply, *, iterations=None, sleep=time.sleep):
                     previous_result=result
                 except Exception as exc:ua.log('更新確認失敗（生成は継続）: '+str(exc))
                 next_update=now+UPDATE_INTERVAL_SEC
-            if goal_progress(_read_obj(ROOT/'work'/'state.json'))>=GOAL_TOTAL:
-                write_runtime_status('WAITING','目標200問に到達。生成を停止')
-            elif not already_attempted():run_daily()
-            elif campaign_due(_read_obj(ROOT/'work'/'state.json')):run_daily(campaign=True)
-            elif fix_retry_due(_read_obj(ROOT/'work'/'state.json')):run_daily(retry=True,post_fix=True)
-            elif retry_due(_read_obj(ROOT/'work'/'state.json')):run_daily(retry=True)
-            write_runtime_status('WAITING','本日の処理は完了。次回実行を待機中')
+            if supply:
+                decision=supply_schedule()
+                if supply_due(decision):
+                    run_daily(campaign=True)
+                    decision=supply_schedule()
+                write_runtime_status('SUPPLY_'+decision['status'],decision['reason'])
+                if decision['terminal']:
+                    terminal=decision;break
+            else:
+                if goal_progress(_read_obj(ROOT/'work'/'state.json'))>=GOAL_TOTAL:
+                    write_runtime_status('WAITING','目標200問に到達。生成を停止')
+                elif not already_attempted():run_daily()
+                elif campaign_due(_read_obj(ROOT/'work'/'state.json')):run_daily(campaign=True)
+                elif fix_retry_due(_read_obj(ROOT/'work'/'state.json')):run_daily(retry=True,post_fix=True)
+                elif retry_due(_read_obj(ROOT/'work'/'state.json')):run_daily(retry=True)
+                write_runtime_status('WAITING','本日の処理は完了。次回実行を待機中')
             checks+=1
             if iterations is not None and checks>=iterations:break
             for _ in range(60):
                 if STOP.exists():break
                 sleep(1)
     finally:
-        write_runtime_status('STOPPED','停止要求または期限到達')
+        write_runtime_status('SUPPLY_'+terminal['status'] if terminal else 'STOPPED',
+                             terminal['reason'] if terminal else '停止要求または期限到達')
         ua.release_lock(lock)
     ua.log('自動実行が終了')
 
@@ -1291,7 +1338,306 @@ def revision_approve(qid,documentation_url):
         ua.release_lock(lock)
 
 
+def supply_config(root=None):
+    root=ROOT if root is None else Path(root)
+    config=json.loads((root/'work'/'supply_campaign.json').read_text(encoding='utf-8'))
+    if not isinstance(config,dict):raise ValueError('Supply configuration must be an object')
+    for field,maximum in (('target',500),('daily_delivery_target',100),('batch_size',10),
+                          ('daily_call_cap',25),('call_cap',150),('budget_jpy',1000)):
+        if type(config.get(field)) is not int or not 1<=config[field]<=maximum:
+            raise ValueError('Invalid campaign field: '+field)
+    start=datetime.date.fromisoformat(config['start'])
+    stop=datetime.date.fromisoformat(config['stop'])
+    checked=datetime.date.fromisoformat(config['billing_checked_until'])
+    if start>stop or checked>stop or config.get('enabled') is not True:
+        raise ValueError('Invalid campaign consent dates/enabled flag')
+    if config.get('billing_acknowledgement')!='provider billing checked; reservations are not actual charges':
+        raise ValueError('Provider billing confirmation missing; no paid calls')
+    return config
+
+
+def supply_remaining_calls(state,config):
+    used=(state.get('campaign_budget_1000jpy') or {}).get('reserved_calls',0)
+    return max(0,min(campaign_budget_remaining(state),config['call_cap']-used,
+                     config['budget_jpy']//CAMPAIGN_RESERVE_JPY_PER_CALL-used))
+
+
+def supply_schedule(*, day=None):
+    """Read-only supervisor gate. Never load keys, create a deck, or mutate state."""
+    import live_progress as lp
+    day=a.today() if day is None else day
+    def result(status,reason,terminal=False,**extra):
+        return dict(status=status,reason=reason,terminal=terminal,due=status=='READY',**extra)
+    try:
+        raw=json.loads((ROOT/'work'/'supply_campaign.json').read_text(encoding='utf-8'))
+        if isinstance(raw,dict) and raw.get('enabled') is False:
+            return result('DISABLED','新問供給は無効。設定確認・再起動待ち',True)
+        config=supply_config()
+        if day>config['stop']:return result('EXPIRED','承認期間終了。生成を停止',True)
+        if day>config['billing_checked_until']:return result('BILLING_EXPIRED','実請求の確認期限切れ。生成を停止',True)
+        if day<config['start']:return result('WAITING_START','承認開始日まで待機')
+        state=json.loads((ROOT/'work'/'state.json').read_text(encoding='utf-8-sig'))
+        if not state.get('campaign_budget_1000jpy_enabled') or 'campaign_budget_1000jpy' not in state:
+            return result('NO_BUDGET','承認済み予算台帳なし。設定確認待ち',True)
+        calls=supply_remaining_calls(state,config)
+        path=ROOT/'work'/'supply_delivery.json'
+        ledger=json.loads(path.read_text(encoding='utf-8')) if path.exists() else {'receipts':{},'days':{}}
+        if not isinstance(ledger.get('receipts'),dict) or not isinstance(ledger.get('days'),dict):
+            raise ValueError('Invalid delivery ledger')
+        active={q['id'] for q in lp.preview_candidates(state) if not lp.supply_quality_error(q)}
+        delivered=len(set(ledger['receipts']) & active)
+        daily=len({q['id'] for q in ledger['days'].get(day,[]) if q['id'] in active})
+        if delivered>=config['target']:return result('COMPLETE','追加配信の累計目標に到達。生成を停止',True)
+        if calls<2:return result('BUDGET_EXHAUSTED','API予算残枠不足。追加予算の承認待ち',True,remaining_calls=calls)
+        if daily>=config['daily_delivery_target']:return result('WAITING_DAILY','本日の新問目標達成。翌日まで待機',remaining_calls=calls)
+        if config['daily_call_cap']-used_today(state)<2:
+            return result('WAITING_QUOTA','本日のAPI枠不足。翌日まで待機',remaining_calls=calls)
+        if state.get('supply_paused_day')==day:
+            return result('PAUSED','本日は安全停止済み。保存済みジョブを確認',remaining_calls=calls)
+        if (ROOT/'work'/'stop_requested').exists():return result('STOPPED','停止要求',True)
+        return result('READY','新問供給を実行可能',remaining_calls=calls)
+    except (OSError,ValueError,KeyError,TypeError,AttributeError):
+        return result('INVALID','設定または台帳が不正。確認・再起動待ち',True)
+
+
+def supply_due(decision=None):
+    return (supply_schedule() if decision is None else decision)['due']
+
+
+def supply_specs_for(state,n,existing,counts):
+    """Apply domain deficits and least-used topics, including this very batch."""
+    usage=_topic_usage(state,existing)
+    counts=dict(counts)
+    specs=specs_for(state,n,existing)
+    for position,spec in enumerate(specs):
+        total=sum(counts.values())+1
+        domain=max(SAA_WEIGHTS,key=lambda d:total*SAA_WEIGHTS[d]/100-counts[d])
+        counts[domain]+=1
+        topics=SAA_BLUEPRINT[domain]
+        offset=(int(spec['id'].rsplit('-',1)[1])-1)%len(topics)
+        # Avoid a repeated topic within the batch even when old coverage is skewed.
+        used={s['topic'] for s in specs[:position] if s['domain']==domain}
+        available=[topics[(offset+j)%len(topics)] for j in range(len(topics))]
+        available=[t for t in available if t not in used] or available
+        topic=min(available,key=lambda t:usage.get((domain,t),0))
+        usage[(domain,topic)]=usage.get((domain,topic),0)+1
+        spec['domain']=domain;spec['topic']=topic
+    return specs
+
+
+def supply_batch_size(state,requested):
+    """Keep the 9500-token cap. Start at two; expand only with measured output."""
+    observed=state.get('supply_output_tokens_per_question')
+    per_question=4000 if observed is None else max(1,int(observed*1.3+0.999))
+    # 1000 tokens of framing/headroom; <=10 is still the operator's upper bound.
+    safe=max(1,8500//per_question)
+    return min(requested,safe,state.get('supply_batch_ceiling',10))
+
+
+def configure_supply(start,stop,billing_until):
+    """One explicit local opt-in. Never changes keys or raises prior authorizations."""
+    import live_progress as lp
+    path=ROOT/'work'/'supply_campaign.json'
+    if path.exists():
+        print('設定は既存です。停止後に既存設定を確認してください。上書きなし。');return 2
+    config={'enabled':True,'start':start,'stop':stop,'billing_checked_until':billing_until,
+            'target':500,'daily_delivery_target':100,'batch_size':10,
+            'daily_call_cap':25,'call_cap':150,'budget_jpy':1000,
+            'billing_acknowledgement':'provider billing checked; reservations are not actual charges'}
+    # Validate before persisting, including dates, without loading credentials.
+    for value in (start,stop,billing_until):datetime.date.fromisoformat(value)
+    if not start<=billing_until<=stop:raise ValueError('Invalid consent dates')
+    if not STOP.exists():raise RuntimeError('Stop Autopilot before configuring supply')
+    state=a.jread(a.STATEFILE,a.state_default())
+    if not state.get('campaign_budget_1000jpy_enabled') or 'campaign_budget_1000jpy' not in state:
+        raise RuntimeError('Existing authorized campaign ledger required; never initialize a fresh budget')
+    campaign_budget_remaining(state)
+    backup=ROOT/'work'/'state.before_supply.json'
+    with backup.open('xb') as stream:stream.write(a.STATEFILE.read_bytes())
+    lp.save_json(path,config)
+    lp.prepare_supply_practice(ROOT)  # Capture baseline BEFORE any generation.
+    print('累計500・日次100問目標を設定。API 0回。従来台帳・予算・成績を維持。')
+    return 0
+
+
+def run_supply():
+    """Opt-in, resumable generation/review/delivery, using the SAME finite ledger.
+
+    Each call is reserved before the network boundary. Jobs own IDs before a call,
+    cache raw replies before parsing and bound crash/transport retries to two.
+    No paid call is permitted with unknown billing consent or an absent ledger.
+    """
+    import live_progress as lp
+    lock=ua.windows_lock(ROOT/'work'/'supply.lock')
+    if lock is None:return 0
+    state=None;reason='';code=0;config=None
+    def checkpoint():lp.save_json(a.STATEFILE,state)
+    try:
+        config=supply_config()
+        state=a.jread(a.STATEFILE,a.state_default())
+        report=lp.prepare_supply_practice(ROOT)
+        if STOP.exists():reason='停止要求';return 0
+        if not config['start']<=a.today()<=config['stop']:
+            reason='承認期間外。日付の明示的な再設定が必要';return 0
+        if a.today()>config['billing_checked_until']:
+            reason='実請求の確認期限切れ。追加課金せず停止';return 0
+        if not state.get('campaign_budget_1000jpy_enabled') or 'campaign_budget_1000jpy' not in state:
+            reason='承認済み予算台帳なし。自動初期化しません';return 0
+        if report['delivered_total']>=config['target']:
+            reason='追加500問の配信目標に到達';return 0
+        if report['new_questions']>=config['daily_delivery_target']:
+            reason='本日の新問目標に到達';return 0
+        jobs=state.setdefault('supply_jobs',[])
+        if state.get('supply_paused_day')==a.today():
+            reason=state.get('supply_last_error','本日は安全停止済み');return 0
+        def available():
+            return min(supply_remaining_calls(state,config),
+                       config['daily_call_cap']-used_today(state))
+        if available()<2:
+            reason='API予算・日次枠不足。100問は未達。追加予算の承認待ち';return 0
+        api=API(*a.load_keys(),limit=max(0,available()))
+        def request(job,provider,prompt,payload):
+            key=provider+'_response'
+            if key in job:return job[key]
+            attempts=job.setdefault('attempts',{})
+            while attempts.get(provider,0)<2:
+                if STOP.exists():raise RuntimeError('停止要求')
+                if available()<=0:raise RuntimeError('API予算・日次枠不足')
+                attempts[provider]=attempts.get(provider,0)+1
+                checkpoint()  # Conservative if killed before the reservation.
+                reserve_campaign_api_request(state)
+                checkpoint()
+                try:
+                    if provider=='openai':api.generation_usage=None
+                    result=api.call(provider,prompt,payload)
+                    job[key]=result
+                    if provider=='openai':job['generation_usage']=getattr(api,'generation_usage',None)
+                    checkpoint()  # Replay cached raw response after a parsing crash.
+                    return result
+                except ValueError:
+                    if provider=='openai':job['generation_usage']=getattr(api,'generation_usage',None)
+                    checkpoint()
+                    raise
+                except (RuntimeError,TimeoutError,urllib.error.URLError) as exc:
+                    # Persist only the error category, never provider text or secrets.
+                    job.setdefault('errors',[]).append(type(exc).__name__)
+                    checkpoint()
+                    if attempts[provider]>=2:raise RuntimeError('通信失敗・再試行上限。保存済みジョブを確認') from None
+                    time.sleep(2)
+            raise RuntimeError('中断されたAPIジョブの再試行上限')
+        existing=a.jread(a.STUDY_FILE)['questions']
+        baseline_path=ROOT/'work'/'supply_delivery.json'
+        while available()>0:
+            if STOP.exists():reason='停止要求';break
+            report=lp.prepare_supply_practice(ROOT)
+            if report['new_questions']>=config['daily_delivery_target'] or report['remaining']==0:
+                reason='本日の新問または累計目標に到達';break
+            job=next((j for j in jobs if j['status']=='PENDING'),None)
+            if job is None:
+                if available()<2:reason='API残枠不足。次の日次枠または予算承認待ち';break
+                counts={d:0 for d in SAA_WEIGHTS}
+                ledger=json.loads(baseline_path.read_text(encoding='utf-8'))
+                for receipt in ledger['receipts'].values():counts[receipt['domain']]+=1
+                for pending in (state.get('pending') or {}).values():
+                    if pending.get('domain') in counts:counts[pending['domain']]+=1
+                size=supply_batch_size(state,min(config['batch_size'],report['shortfall'],report['remaining']))
+                index=state.get('generated_index',0)
+                all_ids=set(state.get('generated',{}))|set(state.get('pending',{}))|set(state.get('failed_generations',{}))
+                all_ids.update(q['id'] for q in existing)
+                for uid in all_ids:
+                    if re.fullmatch(r'SAA-AUTO-\d+',uid):index=max(index,int(uid.rsplit('-',1)[1]))
+                state['generated_index']=index
+                specs=supply_specs_for(state,size,existing,counts)
+                state['generated_index']+=size
+                job={'status':'PENDING','date':a.today(),'specs':specs}
+                jobs.append(job);checkpoint()  # IDs cannot be reused after a crash.
+            safe=supply_batch_size(state,config['batch_size'])
+            if 'openai_response' not in job and len(job['specs'])>safe:
+                # Old ten-item jobs can be resized BEFORE the first new paid call.
+                job['status']='SPLIT'
+                for start in range(0,len(job['specs']),safe):
+                    jobs.append({'status':'PENDING','date':a.today(),
+                                 'specs':job['specs'][start:start+safe],
+                                 'attempts':dict(job.get('attempts',{}))})
+                checkpoint();continue
+            try:
+                raw=request(job,'openai',G_PROMPT,{'specs':job['specs']})
+            except ValueError as exc:
+                if not getattr(exc,'output_truncated',False):raise
+                job['status']='TRUNCATED'
+                job.setdefault('errors',[]).append('max_output_tokens')
+                state['supply_batch_ceiling']=max(1,len(job['specs'])//2)
+                for spec in job['specs']:
+                    state.setdefault('failed_generations',{})[spec['id']]={'date':a.today(),'reason':'max_output_tokens'}
+                if len(job['specs'])==1:
+                    reason='1問でも出力トークン上限。追加課金せず本日は停止'
+                    state['supply_paused_day']=a.today();state['supply_last_error']=reason
+                checkpoint()
+                if len(job['specs'])==1:break
+                continue
+            if not isinstance(raw,dict):raise ValueError('OpenAI response must be an object')
+            class Cached:
+                def call(self,*args):return raw
+            proposals=salvage_batch(Cached(),job['specs'],G_PROMPT)
+            tokens=(job.get('generation_usage') or {}).get('output_tokens')
+            if type(tokens) is int and tokens>0 and proposals:
+                estimate=(tokens+len(proposals)-1)//len(proposals)
+                state['supply_output_tokens_per_question']=max(estimate,state.get('supply_output_tokens_per_question',0))
+                checkpoint()
+            valid=[]
+            for q in proposals:
+                error=lp.supply_quality_error(q)
+                others=existing+[entry.get('candidate',{}) for entry in state.get('generated',{}).values()]+valid
+                if not error and any(lp.supply_similar(lp.supply_fingerprint(q),lp.supply_fingerprint(old))
+                                     for old in others if old.get('id')!=q['id']):
+                    error='near duplicate'
+                if error:
+                    job.setdefault('rejected',{})[q['id']]=error
+                else:valid.append(q)
+            state.setdefault('pending',{}).update({q['id']:q for q in valid});checkpoint()
+            missing=set(s['id'] for s in job['specs'])-{q['id'] for q in proposals}
+            for uid in missing:state.setdefault('failed_generations',{})[uid]={'date':a.today(),'reason':'invalid provider response'}
+            if missing:state['supply_batch_ceiling']=max(1,len(job['specs'])//2)
+            if valid:
+                reviewed=request(job,'gemini',R_PROMPT,{'questions':valid})
+                if not isinstance(reviewed,dict):raise ValueError('Gemini response must be an object')
+                reviews=reviewed.get('reviews')
+                if not isinstance(reviews,list) or len(reviews)!=len(valid) or {r.get('id') for r in reviews if isinstance(r,dict)}!={q['id'] for q in valid}:
+                    raise ValueError('Gemini review IDs/count invalid')
+                for review in reviews:a.validate_review(review)
+                by_id={r['id']:r for r in reviews}
+                for q in valid:
+                    r=by_id[q['id']]
+                    passed=r['verdict']=='PASS' and not r.get('issues') and a.meets_exam_quality(r)
+                    state.setdefault('generated',{})[q['id']]={'candidate':q,
+                        'status':'QUALITY_HOLD' if passed else 'REVISE_UNRESOLVED',
+                        'audit':[{'role':'gemini','review':r}],
+                        'official_documentation_verified':False,'human_approved':False}
+                    state['pending'].pop(q['id'],None)
+            job['status']='COMPLETE';checkpoint()
+            refreshed=lp.prepare_supply_practice(ROOT)
+            if refreshed['delivered_total']==report['delivered_total']:
+                reason='品質・重複により配信増分0件。本日は追加課金せず停止'
+                state['supply_paused_day']=a.today();state['supply_last_error']=reason;checkpoint();break
+        if not reason:reason='API予算・日次枠上限。追加承認なしで増額しません'
+    except (ValueError,KeyError,TypeError,OSError,RuntimeError) as exc:
+        reason='安全停止: '+type(exc).__name__+' (保存済みジョブ・設定・通信を確認)';code=1
+        if state is not None:
+            state['supply_paused_day']=a.today();state['supply_last_error']=reason;checkpoint()
+    finally:
+        try:
+            lp.save_json(ROOT/'work'/'outputs'/'supply_run.json',{'date':a.today(),'reason':reason,'exit_code':code})
+            if config is not None:lp.prepare_supply_practice(ROOT)
+        finally:ua.release_lock(lock)
+        print('[SUPPLY]',reason,flush=True)
+    return code
+
+
 if __name__=='__main__':
+    if len(sys.argv)==5 and sys.argv[1]=='supply-configure':
+        sys.exit(configure_supply(*sys.argv[2:]))
+    if sys.argv[1:]==['supply-once']:
+        sys.exit(run_supply())
     if len(sys.argv)==4 and sys.argv[1]=='revision-request-changes':
         sys.exit(revision_request_changes(sys.argv[2],sys.argv[3]))
     if len(sys.argv)==3 and sys.argv[1]=='revision-retry':

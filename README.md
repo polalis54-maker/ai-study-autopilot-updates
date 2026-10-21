@@ -1,5 +1,10 @@
 # AI Study Autopilot (Windows updater)
 
+For the opt-in **100 new provisional questions/day, 500 cumulative** supply
+controller, recovery guarantees, unchanged budget and one-time Windows setup,
+see [NIGHT_SUPPLY.md](NIGHT_SUPPLY.md). Legacy behavior below remains unchanged
+until the new supply campaign is explicitly configured.
+
 AI Study SAA-C03 practice-question pipeline and update distribution. The repository
 contains application update files, **not** the user's Windows data, keys, or study history.
 

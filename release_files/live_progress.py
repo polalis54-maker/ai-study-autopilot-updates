@@ -1,5 +1,5 @@
 """Progress and fail-closed LOCAL AI Study sync. No network or model API calls."""
-import datetime, hashlib, html, io, json, re, zipfile
+import datetime, functools, hashlib, html, io, json, re, zipfile
 from pathlib import Path
 
 
@@ -983,6 +983,8 @@ def prepare_daily_practice(root=None, *, open_page=False, today=None, max_questi
     paid API counters, or provider keys. Delivery ledger is only a list of IDs.
     """
     root=Path(root) if root is not None else Path(__file__).resolve().parent
+    if (root/'work'/'supply_campaign.json').exists():
+        return prepare_supply_practice(root,open_page=open_page,today=today)
     day=today or datetime.datetime.now().astimezone().date().isoformat()
     if not re.fullmatch(r'[0-9]{4}-[0-9]{2}-[0-9]{2}',day):
         raise ValueError('不正な日付')
@@ -1055,6 +1057,157 @@ def prepare_daily_practice(root=None, *, open_page=False, today=None, max_questi
         import webbrowser
         webbrowser.open(existing_page.resolve().as_uri())
     return report
+
+
+def supply_quality_error(q):
+    """Conservative local guard; this is not independent AWS fact checking."""
+    if q.get('domain') not in ('D1','D2','D3','D4'):
+        return 'invalid domain'
+    if q.get('type')=='multiple' and not re.search(r'2\s*つ|２つ|二つ',q.get('question','')):
+        return 'missing selection count'
+    explanation=q.get('explanation','')
+    for letter in q.get('choices',{}):
+        if not re.search(r'(?:【|\b|^|\n)'+letter+r'(?:】|[.:：、）)])\s*\S.{8,}',explanation):
+            return 'missing choice explanation: '+letter
+    # Known false-PASS family: reject for independent review, including negations.
+    text=json.dumps(q,ensure_ascii=False).lower()
+    if 'sqs' in text and re.search(r'cross.region.{0,30}(clone|replicat)|クロスリージョン.{0,30}(クローン|複製)|fifo.{0,25}(スケールできない|拡張できない)',text):
+        return 'SQS/FIFO claim requires independent verification'
+    return ''
+
+
+def supply_fingerprint(q):
+    """Ignore IDs, labels and answer ordering; compare the architecture decision."""
+    norm=lambda s:re.sub(r'[\W_]+','',str(s).lower())
+    choices=q.get('choices',{})
+    if isinstance(choices,list):choices=dict(zip('ABCDE',choices))
+    return norm(q.get('question',''))+'|'+ '|'.join(sorted(norm(choices.get(k,'')) for k in q.get('correct',[])))
+
+
+@functools.lru_cache(maxsize=2048)
+def _supply_shingles(text):
+    return frozenset(text[i:i+3] for i in range(len(text)-2))
+
+
+def supply_similar(left,right):
+    """Cheap character-shingle overlap screen before the text similarity check.
+
+    A conservative heuristic, not a proof of semantic uniqueness. Gemini must
+    still review scenario novelty; official verification remains separate.
+    """
+    import difflib
+    if left==right:return True
+    a=_supply_shingles(left)
+    b=_supply_shingles(right)
+    if not a or not b or len(a & b)/min(len(a),len(b))<.65:return False
+    return difflib.SequenceMatcher(None,left,right,autojunk=False).ratio()>=.88
+
+
+def prepare_supply_practice(root, *, open_page=False, today=None):
+    """Serialize practice-today and watchdog deliveries across Windows processes."""
+    import os
+    path=Path(root)/'work'/'supply_delivery.lock'
+    with path.open('a+b') as handle:
+        if handle.tell()==0:handle.write(b'0');handle.flush()
+        handle.seek(0)
+        if os.name=='nt':
+            import msvcrt
+            msvcrt.locking(handle.fileno(),msvcrt.LK_NBLCK,1)
+        else:
+            import fcntl
+            fcntl.flock(handle.fileno(),fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:return _prepare_supply_practice(root,open_page=open_page,today=today)
+        finally:
+            handle.seek(0)
+            if os.name=='nt':msvcrt.locking(handle.fileno(),msvcrt.LK_UNLCK,1)
+            else:fcntl.flock(handle.fileno(),fcntl.LOCK_UN)
+
+
+def _prepare_supply_practice(root, *, open_page=False, today=None):
+    """Journal first, render second: a crash replays the same deck, never re-counts.
+
+    The private ledger is the source of truth. It contains replayable daily decks
+    and immutable delivery receipts. Existing state and the verified PWA are read-only.
+    """
+    import difflib
+    root=Path(root);work=root/'work';out=work/'outputs'
+    day=today or datetime.datetime.now().astimezone().date().isoformat()
+    datetime.date.fromisoformat(day)
+    config=json.loads((work/'supply_campaign.json').read_text(encoding='utf-8'))
+    target=config.get('target');daily=config.get('daily_delivery_target')
+    if type(target) is not int or not 1<=target<=500 or type(daily) is not int or not 1<=daily<=100:
+        raise ValueError('Invalid supply targets')
+    state=json.loads((work/'state.json').read_text(encoding='utf-8-sig'))
+    path=work/'supply_delivery.json'
+    if path.exists():
+        ledger=json.loads(path.read_text(encoding='utf-8'))
+        if ledger.get('schema')!=1 or not isinstance(ledger.get('receipts'),dict) or not isinstance(ledger.get('days'),dict):
+            raise ValueError('Invalid supply delivery journal; refusing reset')
+    else:
+        oldpath=work/'practice_delivery.json'
+        old=json.loads(oldpath.read_text(encoding='utf-8')) if oldpath.exists() else {}
+        baseline=set(old.get('delivered_ids',[]))
+        # Previously generated records do not become a fake new campaign increment.
+        baseline.update((state.get('generated') or {}).keys())
+        baseline.update((state.get('existing') or {}).keys())
+        baseline.update((state.get('pending') or {}).keys())
+        ledger={'schema':1,'baseline_ids':sorted(baseline),'receipts':{},'days':{}}
+    baseline=set(ledger['baseline_ids']);receipts=ledger['receipts']
+    candidates={q['id']:q for q in preview_candidates(state) if not supply_quality_error(q)}
+    active_ids=set(receipts)&set(candidates)
+    selected=[q for q in ledger['days'].get(day,[]) if q['id'] in candidates]
+    selected_ids={q['id'] for q in selected}
+    fingerprints=[r['fingerprint'] for r in receipts.values()]
+    # Compare against baseline, pending and every revision history as well.
+    def collect(obj):
+        if isinstance(obj,dict):
+            if 'question' in obj and 'choices' in obj:yield obj
+            else:
+                for v in obj.values():yield from collect(v)
+        elif isinstance(obj,list):
+            for v in obj:yield from collect(v)
+    corpus=[(q.get('id'),supply_fingerprint(q)) for q in collect(state)]
+    rejected=[]
+    for uid,q in candidates.items():
+        if len(selected)>=daily or len(active_ids)>=target:break
+        if uid in baseline or uid in receipts or uid in selected_ids:continue
+        fp=supply_fingerprint(q)
+        comparison=set(fingerprints+[fp for old_id,fp in corpus if old_id!=uid])
+        if any(supply_similar(fp,old) for old in comparison):
+            rejected.append(uid);continue
+        selected.append(q);selected_ids.add(uid);fingerprints.append(fp)
+        receipts[uid]={'date':day,'domain':q['domain'],'fingerprint':fp}
+        active_ids.add(uid)
+    changed=ledger['days'].get(day)!=selected
+    ledger['days'][day]=selected
+    out.mkdir(parents=True,exist_ok=True)
+    save_json(path,ledger)  # Write-ahead receipt/deck, including the one-time baseline.
+    runtime_path=out/'supply_run.json'
+    run=json.loads(runtime_path.read_text(encoding='utf-8')) if runtime_path.exists() else {}
+    reason=run.get('reason','未配信の品質審査済み候補が不足。PC稼働・設定・予算を確認してください。')
+    report={'status':'READY' if selected else 'NO_NEW','date':day,'new_questions':len(selected),
+            'delivered_total':len(active_ids),'historical_deliveries':len(receipts),
+            'target':target,'remaining':max(0,target-len(active_ids)),
+            'daily_target':daily,'shortfall':max(0,daily-len(selected)),
+            'provisional_count':len(candidates),'independently_verified':0,
+            'verified_notice':'この配信は全件未検証。正式問題集の検証済み件数とは別。',
+            'duplicate_rejections':rejected,'reason':reason,
+            'path':str(out/'AI_Study_本日の新問.html')}
+    summary=('新規出題可能: 今日 '+str(len(selected))+'件 / 累計 '+str(len(active_ids))+'/'+str(target)+'件。'
+             +' 未検証 '+str(len(selected))+'件 / この配信の検証済み 0件。目標不足 '+str(report['shortfall'])+'件。 '+reason)
+    if selected:
+        payload=json.dumps(selected,ensure_ascii=False).replace('<','\\u003c').replace('>','\\u003e').replace('&','\\u0026')
+        payload=payload.replace('\u2028','\\u2028').replace('\u2029','\\u2029')
+        page=PREVIEW_HTML.replace('__PAYLOAD__',payload).replace('<p id="count"', '<p>'+html.escape(summary)+'</p><p id="count"')
+    else:
+        page='<meta charset="utf-8"><h1>新規問題は0問です</h1><p>'+html.escape(summary)+'</p>'
+    dest=Path(report['path']);tmp=dest.with_suffix('.html.tmp')
+    tmp.write_text(page,encoding='utf-8');tmp.replace(dest)
+    save_json(out/'daily_practice_status.json',report)
+    if open_page:
+        import webbrowser
+        webbrowser.open(dest.resolve().as_uri())
+    return dict(report,status=('ALREADY_READY' if selected and not changed else report['status']))
 
 
 if __name__=='__main__':

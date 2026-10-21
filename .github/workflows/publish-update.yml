@@ -78,6 +78,8 @@ jobs:
         run: python3 tests/test_practice_preview.py
       - name: Verify daily independent provisional study set generation
         run: python3 tests/test_daily_practice.py
+      - name: Verify opt-in 500-question supply with mock providers only
+        run: python3 tests/test_supply_campaign.py
       - name: Package and checksum permitted files
         id: package
         shell: bash
