@@ -1,7 +1,7 @@
 name: Revision pipeline verification
 on:
   push:
-    branches: [feature/human-revision-feedback-v1]
+    branches: [feature/local-unverified-practice-preview]
   workflow_dispatch:
 permissions:
   contents: read
@@ -24,5 +24,6 @@ jobs:
       - run: python3 tests/test_revision_staging.py
       - run: python3 tests/test_revision_approval.py
       - run: python3 tests/test_revision_feedback.py
+      - run: python3 tests/test_practice_preview.py
       - run: python3 tests/test_trophies.py
       - run: python3 tests/test_campaign_budget.py
