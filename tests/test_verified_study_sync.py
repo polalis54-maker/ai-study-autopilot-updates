@@ -38,6 +38,11 @@ with tempfile.TemporaryDirectory() as d:
     assert result['unverified_skipped']==2
     assert all(p.read_bytes()==blob for p,blob in originals.items())
     assert not (out/'AI_Study_公開用.zip').exists()
+    # A completed background run must never auto-deploy when all candidates are held.
+    lp.publish_mobile=lambda *args,**kwargs: (_ for _ in ()).throw(
+        AssertionError('unverified content must never auto-publish to Netlify'))
+    lp.update(out,status='COMPLETE',phase='tested locally')
+    assert json.loads((out/'study_sync_status.json').read_text(encoding='utf8'))['status']=='BLOCKED_UNVERIFIED'
     approval_file=root/'work'/'content_approvals.json'
     # Tampered/AI-only approvals or invalid evidence are still rejected.
     for case in (
