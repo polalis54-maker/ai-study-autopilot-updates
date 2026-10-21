@@ -867,14 +867,13 @@ button:disabled{opacity:.55;cursor:not-allowed}.bar{display:flex;gap:12px;flex-w
 <button id="grade" class="action">解答・解説を表示</button><button id="next" class="action secondary">次の問題 →</button></div>
 <div id="result" class="result" hidden><div id="correct"></div><p id="explanation"></p>
 <p class="warning">この解説は未検証です。疑問があればAWS公式資料で確認してください。</p></div></section>
-<section id="feedbackBox" class="head"><h2>未検証問題の品質報告</h2><p class="subtle">報告はローカル保存のみ。AWS公式検証・自動採用には使用されません。ブラウザーのfile://保存は環境によって消えるため、JSON保存を推奨します。</p><label>回答の自信度 <select id="confidence"><option value="1">自信なし</option><option value="2" selected>普通</option><option value="3">確信あり</option></select></label><label>問題の指摘 <select id="reportReason"><option value="正答が疑わしい">正答が疑わしい</option><option value="解説が不正確">解説が不正確</option><option value="重複問題">重複問題</option><option value="その他">その他</option></select></label><label>補足（任意、500文字まで）<textarea id="reportNote" maxlength="500" placeholder="例：このAWSサービスには記載の機能がない"></textarea></label><button id="reportIssue" type="button" class="action secondary">この問題を報告として保存</button><p id="reportStatus" class="subtle" aria-live="polite"></p></section>
+<section id="feedbackBox" class="head"><h2>未検証問題の品質報告</h2><p class="subtle">報告はこのページ内の一時記録です。AWS公式検証・自動採用には使用されません。閉じる前にJSON保存し、次回は読み込んでください。</p><label>回答の自信度 <select id="confidence"><option value="1">自信なし</option><option value="2" selected>普通</option><option value="3">確信あり</option></select></label><label>問題の指摘 <select id="reportReason"><option value="正答が疑わしい">正答が疑わしい</option><option value="解説が不正確">解説が不正確</option><option value="重複問題">重複問題</option><option value="その他">その他</option></select></label><label>補足（任意、500文字まで）<textarea id="reportNote" maxlength="500" placeholder="例：このAWSサービスには記載の機能がない"></textarea></label><button id="reportIssue" type="button" class="action secondary">この問題を報告として保存</button><p id="reportStatus" class="subtle" aria-live="polite"></p></section>
 </main><script>
 const questions=__PAYLOAD__;
 let index=0;
 const selected=new Set();
 const el=id=>document.getElementById(id);
 
-const STORAGE_KEY='ai-study-provisional-feedback-v1';
 const REASONS=['正答が疑わしい','解説が不正確','重複問題','その他'];
 const DOMAINS=['D1','D2','D3','D4'];
 function blankProgress(){return {schema:1,attempts:Object.create(null),reports:Object.create(null)};}
@@ -899,15 +898,11 @@ function normalizeProgress(value){
   }
   return clean;
 }
-function loadProgress(){
-  try{const raw=localStorage.getItem(STORAGE_KEY);return raw?normalizeProgress(JSON.parse(raw)):blankProgress();}
-  catch{return blankProgress();}
-}
+function loadProgress(){return blankProgress();}
 let practiceProgress=loadProgress();
 function persistProgress(){
-  try{localStorage.setItem(STORAGE_KEY,JSON.stringify(practiceProgress));
-    el('storageStatus').textContent='練習履歴はこのブラウザーにも保存済み。別日・別ブラウザーへの移行にはJSON保存を使ってください。';return true;}
-  catch{el('storageStatus').textContent='ブラウザー保存が使えません。ページを閉じる前にJSON保存してください。';return false;}
+  el('storageStatus').textContent='履歴はこのページ内だけの一時記録です。閉じる前にJSON保存してください。';
+  return false;
 }
 function summarizeProgress(data){
   const byDomain=Object.fromEntries(DOMAINS.map(d=>[d,{first:0,firstCorrect:0,repeats:0,repeatCorrect:0}]));
@@ -996,9 +991,7 @@ el('importFeedback').onchange=async event=>{
   finally{event.target.value='';}
 };
 renderStats();
-try{localStorage.getItem(STORAGE_KEY);
-  el('storageStatus').textContent='ブラウザー内の記録を利用中。別日への確実な移行はJSON保存・読み込みを使ってください。';}
-catch{el('storageStatus').textContent='ブラウザー保存不可。閉じる前にJSON保存してください。';}
+el('storageStatus').textContent='ブラウザー内には保存しません。閉じる前にJSON保存してください。';
 show();
 </script></body></html>'''
 
