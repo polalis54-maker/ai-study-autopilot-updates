@@ -53,10 +53,27 @@ def campaign_budget_remaining(state):
 
 
 def reserve_campaign_api_request(state):
-    """Reserve BEFORE sending each request. Persists across crashes and restarts."""
+    """Persist BOTH cumulative and day-level reservations before provider requests.
+
+    Count reservations even if the process crashes before recording history;
+    historical calls before rollout become a one-time day baseline.
+    """
+    if not state.get('campaign_budget_1000jpy_enabled',False):
+        raise RuntimeError('集中生成の予算設定が無効')
     if campaign_budget_remaining(state)<=0:
         raise RuntimeError('集中生成の予算代理上限に到達したため追加API呼び出し停止')
     ledger=state.setdefault('campaign_budget_1000jpy',{'reserved_calls':0})
+    day=a.today()
+    daily_baseline=ledger.setdefault('daily_baseline',{})
+    daily_reserved=ledger.setdefault('daily_reserved',{})
+    baseline=daily_baseline.get(day,history_calls_today(state))
+    reserved=daily_reserved.get(day,0)
+    if type(baseline) is not int or baseline<0 or type(reserved) is not int or reserved<0:
+        raise ValueError('日次予算台帳が不正')
+    if baseline+reserved>=daily_call_cap(day):
+        raise RuntimeError('本日のAPI予約上限に到達したため追加呼び出し停止')
+    daily_baseline[day]=baseline
+    daily_reserved[day]=reserved+1
     ledger['reserved_calls']+=1
     ledger['estimated_reserved_jpy']=ledger['reserved_calls']*CAMPAIGN_RESERVE_JPY_PER_CALL
     ledger['warning']='推定用の予約額。API事業者の実請求額ではない'
@@ -378,11 +395,22 @@ def campaign_due(state):
                     for h in state.get('history',[])))
 
 
-def used_today(state):
-    """Total API requests across all completed runs on this date."""
-    return sum(max(0, h['calls']) for h in state.get('history', [])
-               if isinstance(h, dict) and h.get('date') == a.today()
+def history_calls_today(state):
+    """Committed requests only. May undercount a crash mid-request."""
+    return sum(max(0,h['calls']) for h in state.get('history', [])
+               if isinstance(h,dict) and h.get('date')==a.today()
                and type(h.get('calls')) is int)
+
+
+def used_today(state):
+    """Conservatively include in-flight/crash-persisted reservations."""
+    committed=history_calls_today(state)
+    ledger=state.get('campaign_budget_1000jpy') or {}
+    baseline=(ledger.get('daily_baseline') or {}).get(a.today(),0)
+    reserved=(ledger.get('daily_reserved') or {}).get(a.today(),0)
+    if type(baseline) is not int or baseline<0 or type(reserved) is not int or reserved<0:
+        raise ValueError('日次予算台帳が不正')
+    return max(committed,baseline+reserved)
 
 
 def retry_due(state):
