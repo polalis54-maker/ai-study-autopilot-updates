@@ -743,6 +743,8 @@ def revision_queue(state):
                      if isinstance(entry,dict) and isinstance(entry.get('review'),dict)),{})
         issues=latest.get('issues') or []
         if not isinstance(issues,list):issues=[]
+        if not issues and isinstance(latest.get('notes'),str) and latest['notes'].strip():
+            issues=[latest['notes'].strip()]
         items.append({'id':uid,'domain':q.get('domain'),'topic':q.get('topic'),
                       'question':q.get('question'),'status':record['status'],
                       'issues':issues,'candidate':q})
@@ -843,7 +845,8 @@ def revision_one():
         state.setdefault('history',[]).append(
             {'date':a.today(),'calls':api.calls,
              'items':['revision '+target['id']+': '+result['status']],
-             'errors':[result['error']] if result.get('error') else []})
+             'errors':[],  # Repair failures must not trigger normal batch auto-retry.
+             'revision_error':result.get('error','')})
         a.jwrite(a.STATEFILE,state)
         print('修正試行:',target['id'],result['status'],'API requests:',api.calls)
         print('元問題は変更なし。再審査PASSも正式採用しません。')
