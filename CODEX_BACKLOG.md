@@ -10,6 +10,24 @@ The user wants to **solve AWS SAA-C03 practice questions and complain about qual
 Agent-led coding, regression tests, maintenance, and repeatable delivery should require
 minimal user intervention, within existing authorizations.
 
+## Verified milestones and next real blocker (2026-10-21)
+
+- **v0.5.9 published:** `revision-compare`, `revision-stage`, `revision-approve`
+  and staged-candidate import for PC PWA, with offline end-to-end regression tests.
+  These are release/CI results, not proof of Windows installation.
+- **One real provider trial succeeded:** the owner reported `SAA-AUTO-00020`
+  `REVIEWED_HOLD`, OpenAI revision + Gemini reassessment, **2 API requests**.
+  The source question and learning bank remain unchanged.
+- **Real user-ready gains: 0 verified adopted questions.** The owner has not yet
+  supplied the text/choices/explanations of the revision for independent AWS
+  documentation verification; no operator attestation or local PWA sync was performed.
+- **Next bottleneck:** verify the first repaired question against actual official
+  AWS documentation, identify wrong distractors/claims, then execute a documented,
+  explicit human approval for exactly that candidate. Do not mark this complete
+  from Gemini PASS or GitHub CI. Do not ask the user to run unrelated commands.
+- **No automatic 81-item paid repair:** daily quota near exhausted in last report;
+  the per-request 5-JPY ledger is not a guaranteed real 1000-JPY bill limit.
+
 ### P0: Make content revision truly safe and verifiable
 
 - [ ] Audit the `revision-one` OpenAI JSON-schema request and Gemini review wiring against
@@ -21,9 +39,10 @@ minimal user intervention, within existing authorizations.
       evaluation cases for same-correct-reason scenarios; do not publish solely based
       on fuzzy-string or model confidence.
 - [ ] Give each revision attempt a clear status and original review issues.
-- [ ] **Blocking acceptance:** real provider end-to-end verification with the owner's
-      secured Windows runtime remains **unverified**. Do not auto-approve or silently
-      enable paid batches until this is explicitly tested and authorized.
+- [ ] **Blocking acceptance:** one real OpenAI->Gemini repair succeeded on the owner's
+      Windows runtime, but quality validation, approved staging, Windows PWA sync,
+      and multiple-item failure behavior are **not yet verified there**. Do not auto-approve
+      or silently enable paid batches.
 - [ ] Check provider usage limits: the `1000 JPY / 150 calls / 5-JPY reserve` model
       is a *local proxy*, not a real maximum bill. Fail closed if usage/currency is
       unknown; do not automatically ramp up spending.
@@ -46,8 +65,11 @@ minimal user intervention, within existing authorizations.
 - [ ] Fix Netlify/mobile PWA synchronization errors **without** uploading secrets,
       full private state, or learning history.
 - [ ] Test content manifests, compatibility, offline PWA caching, and upgrade history.
-- [ ] Deliver only quality-approved, provenance-marked questions; no automatic
-      `QUALITY_HOLD` or `REVISE_UNRESOLVED` promotion.
+- [x] Offline implementation (v0.5.9): block AI-only candidates from automatic
+      PC/mobile sync, stage repaired trials separately, and require an explicit
+      content-hash-bound local human/official-documentation attestation.
+- [ ] Verify this approved-only path with real Windows trial data and an actual
+      vetted question; do not conflate green CI with live adoption.
 - [ ] Verify on both PC and mobile in approved environments before marking complete.
 
 ### P3: Exam-focused learner experience
