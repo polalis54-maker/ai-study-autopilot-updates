@@ -1,7 +1,7 @@
 name: Revision pipeline verification
 on:
   push:
-    branches: [feature/revision-pipeline-v1]
+    branches: [feature/revision-audit-status]
   workflow_dispatch:
 permissions:
   contents: read
@@ -14,6 +14,7 @@ jobs:
       - run: python3 tests/test_revision_pipeline.py
       - run: python3 tests/test_revision_http.py
       - run: python3 tests/test_revision_batch.py
+      - run: python3 tests/test_revision_status.py
       - run: python3 tests/test_release.py
       - run: python3 tests/test_campaign.py
       - run: python3 tests/test_mobile.py
