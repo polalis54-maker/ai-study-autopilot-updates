@@ -71,21 +71,33 @@ def sync_study_pack(output_dir):
     out=Path(output_dir);study=out.parent.parent/'AI_Study'
     path=study/'questions.json';index=study/'index.html';sw=study/'sw.js'
     proposals=out/'AI_Study_追加候補.json'
+    staged=out/'revision_staged.json'  # local operator-approved candidates are staged separately
     def report(state,**details):
         result={'status':state,'updated_at':datetime.datetime.now().astimezone().isoformat(timespec='seconds'),**details}
         save_json(out/'study_sync_status.json',result)
         return result
-    if not proposals.is_file() or not all(p.is_file() for p in (path,index,sw)):
+    if not (proposals.is_file() or staged.is_file()) or not all(
+            p.is_file() for p in (path,index,sw)):
         return report('WAITING',message='問題パックまたはアプリのファイル待ち')
     try:
-        incoming=json.loads(proposals.read_text(encoding='utf-8-sig'))['questions']
+        incoming=[]
+        # Neither input file may replace or edit the other's records.
+        # Treat duplicate IDs across files as ambiguous and fail closed.
+        for candidate_file in (proposals,staged):
+            if not candidate_file.is_file():
+                continue
+            obj=json.loads(candidate_file.read_text(encoding='utf-8-sig'))
+            items=obj.get('questions') if isinstance(obj,dict) else None
+            if not isinstance(items,list):
+                raise ValueError('追加候補は questions 配列である必要があります')
+            incoming.extend(items)
         base=json.loads(path.read_text(encoding='utf-8-sig'))
         current=base['questions']
         original_html=index.read_text(encoding='utf-8')
         m=re.search(r'(<script id="default-pack" type="application/json">)(.*?)(</script>)',original_html,re.S)
         if not m:raise ValueError('初期問題データの埋め込みタグがありません')
         inline=json.loads(m.group(2))['questions']
-        if not isinstance(incoming,list) or not isinstance(current,list) or not isinstance(inline,list):
+        if not isinstance(current,list) or not isinstance(inline,list):
             raise ValueError('問題データは配列である必要があります')
         ids=[q['id'] for q in current]
         if ids != [q['id'] for q in inline] or len(ids)!=len(set(ids)):
