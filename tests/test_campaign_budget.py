@@ -23,10 +23,10 @@ for i in range(150):
 assert len(A.saved)==150 and A.saved[-1]==(150,750)
 try:
     ns['reserve_campaign_api_request'](state)
-    assert False,'must stop at 20'
+    assert False,'must stop at 150'
 except RuntimeError:
     pass
-assert len(A.saved)==20
+assert len(A.saved)==150
 assert ns['campaign_budget_remaining']({'campaign_budget_1000jpy':{'reserved_calls':150}})==0
 assert "not state.get('campaign_budget_1000jpy_enabled',False)" in src
 assert 'api.call=budgeted_call' in src
