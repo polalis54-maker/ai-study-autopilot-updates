@@ -870,7 +870,7 @@ const questions=__PAYLOAD__;
 let index=0;
 const selected=new Set();
 const el=id=>document.getElementById(id);
-el('count').textContent=questions.length+'問のAI品質保留候補（正式採用 0問）。';
+el('count').textContent=questions.length+'問のAI品質保留候補（この画面の問題は正式採用数に含まれません）。';
 function show(){
   const q=questions[index];selected.clear();
   el('progress').textContent=(index+1)+' / '+questions.length+'問 • '+q.id+' • '+q.domain+' • '+(q.type==='multiple'?'2つ選択':'1つ選択');
