@@ -48,7 +48,7 @@ for flags in ({'blocked':True},{'enabled':False},{'cap':2}):
     ret,ids,state=run(**flags)
     assert ret==2 and ids==[],flags
 ret,ids,state=run(error_once=True)
-assert ret==0 and len(ids)==1, 'provider failure must stop a three-call loop'
+assert ret==1 and len(ids)==1, 'provider failure must stop with nonzero exit'
 assert state['revision_trials'][ids[0]]['status']=='REVISION_ERROR'
 ret,ids,state=run(count=0)
 assert ret==0 and ids==[]
