@@ -10,6 +10,28 @@ The user wants to **solve AWS SAA-C03 practice questions and complain about qual
 Agent-led coding, regression tests, maintenance, and repeatable delivery should require
 minimal user intervention, within existing authorizations.
 
+## User-impact priority: playable new practice questions
+
+The owner reports **three days of zero additional playable questions** despite
+successful model/API development work. Source review found these blockers:
+
+1. Generated Gemini-PASS items become `QUALITY_HOLD` and are excluded from
+   automated PWA sync until individually approved. This is a conscious quality
+   control, not evidence that generation succeeded in shipping learning content.
+2. The operator previously created `work/stop_requested` to test revision
+   commands; if still present, the Windows unattended generator will not run.
+   Verify the local process state before discussing any paid API restart.
+3. `v0.5.11` code (release confirmation pending) adds private zero-cost
+   `live_progress.py practice-preview`, which renders structurally valid,
+   Gemini-PASS `QUALITY_HOLD` candidates as **clearly unverified, isolated**
+   practice. It does NOT add them to the main study bank or Netlify, and
+   actual counts must be verified on Windows. Do not claim a question-count gain
+   until the owner executes it.
+4. Next priority is to make the main study pack increase via content actually
+   checked against AWS official docs, without allowing false Gemini PASS items
+   to enter verified scoring. The owner prefers practical output over version
+   numbers or elaborate dashboards.
+
 ## Verified milestones and next real blocker (2026-10-21)
 
 - **v0.5.9 published:** `revision-compare`, `revision-stage`, `revision-approve`
