@@ -45,6 +45,8 @@ with tempfile.TemporaryDirectory() as d:
         {'human_approved':True,'official_documentation_verified':False},
         {'human_approved':True,'official_documentation_verified':True,
          'documentation_url':'https://example.com/fake','question_sha256':lp.review_payload_digest(incoming['questions'][0])},
+        {**approval(incoming['questions'][0]),'documentation_url':'https://docs.aws.amazon.com.evil.org/ref'},
+        {**approval(incoming['questions'][0]),'documentation_url':'http://docs.aws.amazon.com/ref'},
         {**approval(incoming['questions'][0]),'question_sha256':'0'*64},
     ):
         write(approval_file,{'approvals':{'SAA-AUTO-00020':case}})
