@@ -20,6 +20,7 @@ jobs:
       - run: python3 tests/test_revision_compare.py
       - run: python3 tests/test_release.py
       - run: python3 tests/test_campaign.py
+      - run: python3 tests/test_coverage_quality.py
       - run: python3 tests/test_mobile.py
       - run: python3 tests/test_verified_study_sync.py
       - run: python3 tests/test_revision_staging.py

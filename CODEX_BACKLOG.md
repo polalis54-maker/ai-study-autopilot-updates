@@ -21,10 +21,18 @@ in `live_progress.py` now target 100/day and 500 additional deliveries. See
 `NIGHT_SUPPLY.md` for the exact private setup, unchanged caps, replay behavior,
 heuristic duplicate/quality limits and outstanding real-machine verification.
 `tests/test_supply_campaign.py` exercises the real controller with fake providers:
-500 distinct deliveries across five dates; baseline 256/22/14 preserved; 100
-reserved requests; generator/reviewer/deck/in-flight crashes; budget and billing
+500 distinct deliveries across five dates; baseline 256/22/14 preserved; 102
+reserved requests including the conservative batch warmup;
+generator/reviewer/deck/in-flight crashes; budget and billing
 stops; malformed replies and finite transport retries. Existing regression suite
 is retained. These are synthetic tests, not real delivered AWS questions.
+
+PR #14 review fixes: read-only supervisor eligibility and terminal/daily waiting
+statuses prevent idle batch-child relaunches; per-ID least-used topics update
+within each batch; token-aware startup/usage growth and persisted truncation
+backoff keep the existing 9500-token ceiling. Mock tests cover supervisor ticks,
+next-day resume, ten-spec topic diversity, real wire parsing with synthetic
+truncation, and old pending-job splitting. No release or paid API run is implied.
 
 Still outstanding: actual Windows deployment/provider throughput and billing,
 AWS factual evaluation, durable per-question learner feedback/weak-area scoring,
