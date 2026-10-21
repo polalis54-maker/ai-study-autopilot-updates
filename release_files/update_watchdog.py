@@ -798,7 +798,7 @@ def revision_summary(state):
     if not isinstance(trials,dict):
         raise ValueError('修正試行の記録形式が不正')
     results={kind:0 for kind in
-             ('REVIEWED_HOLD','REVISION_REQUIRED','REVISION_ERROR','OTHER')}
+             ('REVIEWED_HOLD','REVISION_REQUESTED','REVISION_REQUIRED','REVISION_ERROR','OTHER')}
     by_domain={name:{'waiting':0,'attempted':0,'no_review_issues':0}
                for name in ('D1','D2','D3','D4','OTHER')}
     waiting=[]
@@ -870,6 +870,8 @@ def revision_comparison(state, qid):
     if not isinstance(review,dict):review={}
     return {'id':qid,'original_status':record.get('status'),
             'revision_status':trial.get('status'),
+            'human_review':trial.get('human_review'),
+            'previous_attempts':len((state.get('revision_trial_history') or {}).get(qid,[])),
             'original':safe(original),
             'revision':safe(changed) if changed is not None else None,
             'original_review_issues':last_review.get('issues') or [],
@@ -895,6 +897,64 @@ def revision_compare(qid):
     return 0
 
 
+def revision_is_staged_or_approved(qid):
+    """Do not retry a revision already queued for publication or approved."""
+    staged=a.jread(ROOT/'work'/'outputs'/'revision_staged.json',{'questions':[]})
+    questions=staged.get('questions') if isinstance(staged,dict) else None
+    if not isinstance(questions,list):
+        raise ValueError('修正ステージデータが不正')
+    if any(not isinstance(q,dict) or not isinstance(q.get('id'),str) for q in questions):
+        raise ValueError('修正ステージ内に不正な問題')
+    approvals=a.jread(ROOT/'work'/'content_approvals.json',{'approvals':{}})
+    registered=approvals.get('approvals') if isinstance(approvals,dict) else None
+    if not isinstance(registered,dict):
+        raise ValueError('承認台帳が不正')
+    return any(q['id']==qid for q in questions) or qid in registered
+
+
+def revision_request_changes(qid, feedback):
+    """Record an operator rejection without paid requests or original mutations."""
+    if not isinstance(qid,str) or not re.fullmatch(r'SAA-AUTO-[0-9]{5}',qid):
+        print('改稿IDが不正');return 2
+    if (not isinstance(feedback,str) or len(feedback.strip())<12
+            or len(feedback)>1200):
+        print('具体的な修正指摘を12～1200文字で指定してください');return 2
+    if not STOP.exists():
+        print('Autopilotを停止してから差し戻してください');return 2
+    lock=ua.windows_lock(LOCK)
+    if lock is None:
+        print('Autopilot稼働中。変更しません');return 2
+    try:
+        state=a.jread(a.STATEFILE,a.state_default())
+        record=(state.get('generated') or {}).get(qid)
+        trial=(state.get('revision_trials') or {}).get(qid)
+        if not isinstance(record,dict) or not isinstance(trial,dict):
+            print('改稿試行が見つかりません');return 2
+        if trial.get('status') not in ('REVIEWED_HOLD','REVISION_REQUESTED'):
+            print('審査保留中の改稿だけ差し戻せます');return 2
+        if trial.get('original_status')!=record.get('status'):
+            print('原問題の状態変更を検知したため差し戻し拒否');return 2
+        if not isinstance(trial.get('candidate'),dict) or trial['candidate'].get('id')!=qid:
+            print('改稿IDが一致しません');return 2
+        if revision_is_staged_or_approved(qid):
+            print('ステージ済みまたは承認済み。先に状態を確認してください');return 2
+        notes=feedback.strip()
+        previous=trial.get('human_review')
+        if trial.get('status')=='REVISION_REQUESTED':
+            if isinstance(previous,dict) and previous.get('issues')==[notes]:
+                print('同一の差し戻し指摘を記録済み（変更なし）');return 0
+            print('差し戻し指摘を二重登録しません');return 2
+        trial['status']='REVISION_REQUESTED'
+        trial['human_review']={'verdict':'REVISE','issues':[notes],
+                               'reviewed_at':a.today(),'source':'local_operator'}
+        a.jwrite(a.STATEFILE,state)
+        print('差し戻し記録:',qid,'REVISION_REQUESTED / API 0回')
+        print('原問題・Geminiレビュー・改稿本文は保持。自動で再課金しません。')
+        return 0
+    finally:
+        ua.release_lock(lock)
+
+
 def validated_revision_candidate(response, original):
     """Validate one structured repair and restore trusted source metadata."""
     questions=response.get('questions') if isinstance(response,dict) else None
@@ -914,8 +974,8 @@ def validated_revision_candidate(response, original):
     return proposed
 
 
-def revision_one():
-    """One trial, max 3 API attempts. State changes only under the watchdog lock."""
+def revision_one(retry_id=None):
+    """One trial or explicitly requested revision retry, max 3 provider calls."""
     if a.today()>CUTOFF:
         print('期限後のため修正停止');return 2
     if not STOP.exists():
@@ -932,11 +992,33 @@ def revision_one():
         if campaign_budget_remaining(state)<3 or daily_call_cap()-used_today(state)<3:
             print('3回分のAPI残枠がないため修正しません');return 2
         queue=revision_queue(state)
-        seen=set((state.get('revision_trials') or {}).keys())
-        target=next((x for x in queue if x['id'] not in seen and x['issues']),None)
-        if not target:
-            print('修正指摘つきの未処理候補なし。API呼び出しなし');return 0
-        old=target['candidate']
+        previous_trial=None
+        if retry_id is None:
+            seen=set((state.get('revision_trials') or {}).keys())
+            target=next((x for x in queue if x['id'] not in seen and x['issues']),None)
+            if not target:
+                print('修正指摘つきの未処理候補なし。API呼び出しなし');return 0
+            old=target['candidate']
+            issues=target['issues']
+        else:
+            if not isinstance(retry_id,str) or not re.fullmatch(r'SAA-AUTO-[0-9]{5}',retry_id):
+                print('改稿IDが不正。API呼び出しなし');return 2
+            record=(state.get('generated') or {}).get(retry_id)
+            previous_trial=(state.get('revision_trials') or {}).get(retry_id)
+            if (not isinstance(record,dict) or not isinstance(previous_trial,dict)
+                    or previous_trial.get('status')!='REVISION_REQUESTED'
+                    or previous_trial.get('original_status')!=record.get('status')):
+                print('人手差し戻し済みの改稿が見つかりません。API呼び出しなし');return 2
+            review=previous_trial.get('human_review')
+            issues=review.get('issues') if isinstance(review,dict) else None
+            old=previous_trial.get('candidate')
+            if (not isinstance(issues,list) or len(issues)!=1
+                    or not isinstance(issues[0],str) or not issues[0].strip()
+                    or not isinstance(old,dict) or old.get('id')!=retry_id):
+                print('差し戻し内容が不正。API呼び出しなし');return 2
+            if revision_is_staged_or_approved(retry_id):
+                print('ステージ済み・承認済み改稿は再修正しません');return 2
+            target={'id':retry_id,'status':record['status']}
         keys=a.load_keys()
         api=API(*keys,limit=3)
         original_call=api.call
@@ -959,7 +1041,7 @@ def revision_one():
         try:
             reserve_campaign_api_request(state)
             response=structured_batch_call(api,prompt,
-                     {'specs':[spec],'original':old,'issues':target['issues']})
+                     {'specs':[spec],'original':old,'issues':issues})
             changed=validated_revision_candidate(response,old)
             if question_is_near_duplicate(changed,[],state):
                 raise ValueError('改稿が既存問題と文面重複')
@@ -968,11 +1050,17 @@ def revision_one():
                     and a.meets_exam_quality(verdict) else 'REVISION_REQUIRED')
             result={'id':target['id'],'status':status,'candidate':changed,
                     'review':verdict,'original_status':target['status'],
-                    'official_documentation_verified':False,'human_approved':False}
+                    'official_documentation_verified':False,'human_approved':False,
+                    'revision_round':(previous_trial.get('revision_round',1)+1
+                                      if previous_trial else 1)}
         except Exception as exc:
             result={'id':target['id'],'status':'REVISION_ERROR',
                     'error':type(exc).__name__+': '+str(exc)[:180]}
-        # The generated/source problems and app bank are NEVER modified.
+        # Preserve every previous attempt (including human feedback), even if
+        # retry failed. Never overwrite generated source or the study bank.
+        if previous_trial is not None:
+            state.setdefault('revision_trial_history',{}).setdefault(target['id'],[]).append(
+                json.loads(json.dumps(previous_trial,ensure_ascii=False)))
         state.setdefault('revision_trials',{})[target['id']]=result
         state.setdefault('history',[]).append(
             {'date':a.today(),'calls':api.calls,
@@ -1188,6 +1276,10 @@ def revision_approve(qid,documentation_url):
 
 
 if __name__=='__main__':
+    if len(sys.argv)==4 and sys.argv[1]=='revision-request-changes':
+        sys.exit(revision_request_changes(sys.argv[2],sys.argv[3]))
+    if len(sys.argv)==3 and sys.argv[1]=='revision-retry':
+        sys.exit(revision_one(retry_id=sys.argv[2]))
     if len(sys.argv)==4 and sys.argv[1]=='revision-approve':
         sys.exit(revision_approve(sys.argv[2],sys.argv[3]))
     if len(sys.argv)==3 and sys.argv[1]=='revision-stage':
